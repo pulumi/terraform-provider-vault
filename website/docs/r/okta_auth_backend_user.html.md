@@ -46,3 +46,11 @@ The following arguments are supported:
 ## Attributes Reference
 
 No additional attributes are exposed by this resource.
+
+## Import
+
+Okta authentication backend users can be imported using its `path/user` ID format, e.g.
+
+```
+$ terraform import vault_okta_auth_backend_user.example okta/foo
+```
