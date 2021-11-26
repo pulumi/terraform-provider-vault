@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/logging"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/mutexkv"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/vault/api"
 	awsauth "github.com/hashicorp/vault/builtin/credential/aws"
 	"github.com/hashicorp/vault/command/config"
+
+	"github.com/hashicorp/terraform-provider-vault/helper"
 )
 
 const (
@@ -33,7 +34,7 @@ const (
 // Use this when you need to have multiple resources or even multiple instances
 // of the same resource write to the same path in Vault.
 // The key of the mutex should be the path in Vault.
-var vaultMutexKV = mutexkv.NewMutexKV()
+var vaultMutexKV = helper.NewMutexKV()
 
 func Provider() *schema.Provider {
 	dataSourcesMap, err := parse(DataSourceRegistry)
@@ -594,10 +595,6 @@ var (
 			Resource:      passwordPolicyResource(),
 			PathInventory: []string{"/sys/policy/password/{name}"},
 		},
-		"vault_pki_secret_backend": {
-			Resource:      pkiSecretBackendResource(),
-			PathInventory: []string{UnknownPath},
-		},
 		"vault_pki_secret_backend_cert": {
 			Resource:      pkiSecretBackendCertResource(),
 			PathInventory: []string{"/pki/issue/{role}"},
@@ -670,6 +667,10 @@ var (
 			Resource:      raftSnapshotAgentConfigResource(),
 			PathInventory: []string{"/sys/storage/raft/snapshot-auto/config/{name}"},
 		},
+		"vault_raft_autopilot": {
+			Resource:      raftAutopilotConfigResource(),
+			PathInventory: []string{"/sys/storage/raft/autopilot/configuration"},
+		},
 	}
 )
 
@@ -738,6 +739,9 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 
 	clientConfig.HttpClient.Transport = logging.NewTransport("Vault", clientConfig.HttpClient.Transport)
+
+	// enable ReadYourWrites to support read-after-write on Vault Enterprise
+	clientConfig.ReadYourWrites = true
 
 	client, err := api.NewClient(clientConfig)
 	if err != nil {
