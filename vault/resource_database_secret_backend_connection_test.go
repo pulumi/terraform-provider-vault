@@ -5,20 +5,25 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 
+	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
+	mssqlhelper "github.com/hashicorp/vault/helper/testhelpers/mssql"
 	"github.com/hashicorp/vault/sdk/database/helper/dbutil"
 )
 
 func TestAccDatabaseSecretBackendConnection_import(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendPostgres)
 	connURL := os.Getenv("POSTGRES_URL")
 	if connURL == "" {
 		t.Skip("POSTGRES_URL not set")
 	}
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	userTempl := "{{.DisplayName}}"
@@ -56,6 +61,8 @@ func TestAccDatabaseSecretBackendConnection_import(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_cassandra(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendCassandra)
+
 	host := os.Getenv("CASSANDRA_HOST")
 	if host == "" {
 		t.Skip("CASSANDRA_HOST not set")
@@ -99,6 +106,8 @@ func TestAccDatabaseSecretBackendConnection_cassandra(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_cassandraProtocol(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendCassandra)
+
 	host := os.Getenv("CASSANDRA_HOST")
 	if host == "" {
 		t.Skip("CASSANDRA_HOST not set")
@@ -141,7 +150,53 @@ func TestAccDatabaseSecretBackendConnection_cassandraProtocol(t *testing.T) {
 	})
 }
 
+func TestAccDatabaseSecretBackendConnection_influxdb(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendInfluxDB)
+
+	host := os.Getenv("INFLUXDB_HOST")
+	if host == "" {
+		t.Skip("INFLUXDB_HOST not set")
+	}
+
+	username := os.Getenv("INFLUXDB_USERNAME")
+	password := os.Getenv("INFLUXDB_PASSWORD")
+	backend := acctest.RandomWithPrefix("tf-test-db")
+	name := acctest.RandomWithPrefix("db")
+	resourceName := "vault_database_secret_backend_connection.test"
+	resource.Test(t, resource.TestCase{
+		Providers:    testProviders,
+		PreCheck:     func() { testAccPreCheck(t) },
+		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseSecretBackendConnectionConfig_influxdb(name, backend, host, username, password),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "name", name),
+					resource.TestCheckResourceAttr(resourceName, "backend", backend),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.0", "dev"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.1", "prod"),
+					resource.TestCheckResourceAttr(resourceName, "root_rotation_statements.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "root_rotation_statements.0", "FOOBAR"),
+					resource.TestCheckResourceAttr(resourceName, "verify_connection", "true"),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.host", host),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.port", "8086"),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.username", username),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.password", password),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.tls", "false"),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.insecure_tls", "false"),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.pem_bundle", ""),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.pem_json", ""),
+					resource.TestCheckResourceAttr(resourceName, "influxdb.0.connect_timeout", "5"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccDatabaseSecretBackendConnection_mongodbatlas(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMongoDBAtlas)
+
 	public_key := os.Getenv("MONGODB_ATLAS_PUBLIC_KEY")
 	if public_key == "" {
 		t.Skip("MONGODB_ATLAS_PUBLIC_KEY not set")
@@ -177,6 +232,8 @@ func TestAccDatabaseSecretBackendConnection_mongodbatlas(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_mongodb(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMongoDB)
+
 	connURL := os.Getenv("MONGODB_URL")
 	if connURL == "" {
 		t.Skip("MONGODB_URL not set")
@@ -207,10 +264,12 @@ func TestAccDatabaseSecretBackendConnection_mongodb(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
-	connURL := os.Getenv("MSSQL_URL")
-	if connURL == "" {
-		t.Skip("MSSQL_URL not set")
-	}
+	MaybeSkipDBTests(t, dbBackendMSSQL)
+
+	cleanupFunc, connURL := mssqlhelper.PrepareMSSQLTestContainer(t)
+
+	t.Cleanup(cleanupFunc)
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
@@ -219,7 +278,7 @@ func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseSecretBackendConnectionConfig_mssql(name, backend, connURL),
+				Config: testAccDatabaseSecretBackendConnectionConfig_mssql(name, backend, connURL, false),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "name", name),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "backend", backend),
@@ -233,6 +292,25 @@ func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_open_connections", "2"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_idle_connections", "0"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_connection_lifetime", "0"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.contained_db", "false"),
+				),
+			},
+			{
+				Config: testAccDatabaseSecretBackendConnectionConfig_mssql(name, backend, connURL, true),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "name", name),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "backend", backend),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.#", "2"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.0", "dev"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.1", "prod"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.#", "1"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.0", "FOOBAR"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "verify_connection", "true"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.connection_url", connURL),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_open_connections", "2"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_idle_connections", "0"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.max_connection_lifetime", "0"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mssql.0.contained_db", "true"),
 				),
 			},
 		},
@@ -240,6 +318,8 @@ func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_mysql(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMySQL)
+
 	connURL := os.Getenv("MYSQL_URL")
 	if connURL == "" {
 		t.Skip("MYSQL_URL not set")
@@ -327,6 +407,8 @@ func TestAccDatabaseSecretBackendConnection_mysql(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnectionUpdate_mysql(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMySQL)
+
 	connURL := os.Getenv("MYSQL_URL")
 	if connURL == "" {
 		t.Skip("MYSQL_URL not set")
@@ -380,6 +462,8 @@ func TestAccDatabaseSecretBackendConnectionUpdate_mysql(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnectionTemplatedUpdateExcludePassword_mysql(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMySQL)
+
 	connURL := os.Getenv("MYSQL_CONNECTION_URL")
 	if connURL == "" {
 		t.Skip("MYSQL_CONNECTION_URL not set")
@@ -463,6 +547,8 @@ func TestAccDatabaseSecretBackendConnectionTemplatedUpdateExcludePassword_mysql(
 }
 
 func TestAccDatabaseSecretBackendConnection_mysql_tls(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendMySQL)
+
 	tls_ca := os.Getenv("MYSQL_CA")
 	if tls_ca == "" {
 		t.Skip("MYSQL_CA not set")
@@ -509,6 +595,8 @@ func TestAccDatabaseSecretBackendConnection_mysql_tls(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_postgresql(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendPostgres)
+
 	connURL := os.Getenv("POSTGRES_URL")
 	if connURL == "" {
 		t.Skip("POSTGRES_URL not set")
@@ -544,6 +632,8 @@ func TestAccDatabaseSecretBackendConnection_postgresql(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_elasticsearch(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendElasticSearch)
+
 	connURL := os.Getenv("ELASTIC_URL")
 	if connURL == "" {
 		t.Skip("ELASTIC_URL not set")
@@ -576,6 +666,8 @@ func TestAccDatabaseSecretBackendConnection_elasticsearch(t *testing.T) {
 }
 
 func TestAccDatabaseSecretBackendConnection_snowflake(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendSnowflake)
+
 	url := os.Getenv("SNOWFLAKE_URL")
 	if url == "" {
 		t.Skip("SNOWFLAKE_URL not set")
@@ -676,6 +768,29 @@ resource "vault_database_secret_backend_connection" "test" {
 `, path, name, host, username, password)
 }
 
+func testAccDatabaseSecretBackendConnectionConfig_influxdb(name, path, host, username, password string) string {
+	return fmt.Sprintf(`
+resource "vault_mount" "db" {
+  path = "%s"
+  type = "database"
+}
+
+resource "vault_database_secret_backend_connection" "test" {
+  backend                  = vault_mount.db.path
+  name                     = "%s"
+  allowed_roles            = ["dev", "prod"]
+  root_rotation_statements = ["FOOBAR"]
+
+  influxdb {
+    host     = "%s"
+    username = "%s"
+    password = "%s"
+    tls      = false
+  }
+}
+`, path, name, host, username, password)
+}
+
 func testAccDatabaseSecretBackendConnectionConfig_elasticsearch(name, path, host, username, password string) string {
 	return fmt.Sprintf(`
 resource "vault_mount" "db" {
@@ -740,7 +855,21 @@ resource "vault_database_secret_backend_connection" "test" {
 `, path, name, connURL)
 }
 
-func testAccDatabaseSecretBackendConnectionConfig_mssql(name, path, connURL string) string {
+func testAccDatabaseSecretBackendConnectionConfig_mssql(name, path, connURL string, containedDB bool) string {
+	var config string
+	if containedDB {
+		config = `
+  mssql {
+    connection_url = "%s"
+    contained_db   = true
+  }`
+	} else {
+		config = `
+  mssql {
+    connection_url = "%s"
+  }`
+	}
+
 	return fmt.Sprintf(`
 resource "vault_mount" "db" {
   path = "%s"
@@ -752,12 +881,9 @@ resource "vault_database_secret_backend_connection" "test" {
   name = "%s"
   allowed_roles = ["dev", "prod"]
   root_rotation_statements = ["FOOBAR"]
-
-  mssql {
-	  connection_url = "%s"
-  }
+%s
 }
-`, path, name, connURL)
+`, path, name, fmt.Sprintf(config, connURL))
 }
 
 func testAccDatabaseSecretBackendConnectionConfig_mysql(name, path, connURL, password string) string {
@@ -1001,5 +1127,22 @@ func deleteMySQLUser(t *testing.T, db *sql.DB, username string) {
 	_, err := db.Exec(query)
 	if err != nil {
 		t.Error(err)
+	}
+}
+
+func MaybeSkipDBTests(t *testing.T, engine string) {
+	envVars := []string{"SKIP_DB_TESTS"}
+	for _, e := range dbBackendTypes {
+		if e == engine {
+			envVars = append(envVars, envVars[0]+"_"+strings.ToUpper(engine))
+			break
+		}
+	}
+
+	for _, envVar := range envVars {
+		if os.Getenv(envVar) != "" {
+			t.Skipf("%s is set, skipping", envVar)
+			return
+		}
 	}
 }

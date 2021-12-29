@@ -1,7 +1,32 @@
+## 3.1.1 (December 22, 2021)
+BUGS:
+* Prevent new `entity` read failures when the `VAULT_TOKEN` environment variable is not set.
+
+## 3.1.0 (December 22, 2021)
+FEATURES:
+* `provider`: Add support retrying entity reads for `Client Controlled Consistency` type operations ([#1263](https://github.com/hashicorp/terraform-provider-vault/pull/1263))
+* `provider`: Add support for optionally creating a batch child token via the `skip_child_token` option ([#775](https://github.com/hashicorp/terraform-provider-vault/pull/775))
+
+IMPROVEMENTS:
+* `data/policy_document`: Add support for `patch` capability for vault-1.9+. ([#1238](https://github.com/hashicorp/terraform-provider-vault/pull/1238))
+* `resource/database_secret_backend_connection`: Add support for InfluxDB connections ([#1121](https://github.com/hashicorp/terraform-provider-vault/pull/1121))
+* `resource/generic_secret`: Add support for deleting all version data for a KV-V2 secret ([#1254](https://github.com/hashicorp/terraform-provider-vault/pull/1254))
+* `resource/database_secret_backend_connection`: Add support configuring `Contained Databases` for `mssql` [#1259](https://github.com/hashicorp/terraform-provider-vault/pull/1259))
+* `resource/vault_jwt_auth_backend`: Add `oidc_response_mode`, `oidc_response_types`, and `namespace_in_state` fields [#1244]((https://github.com/hashicorp/terraform-provider-vault/pull/1244))
+* Add better error reporting whenever invalid JSON `metadata` is encountered ([#1262](https://github.com/hashicorp/terraform-provider-vault/pull/1262))
+* `resource/vault_identity_entity_alias`: Add `custom_metadata` support for entity aliases ([#1235]https://github.com/hashicorp/terraform-provider-vault/pull/1235)
+* `resource/approle_auth_backend_role_secret_id`: Update Vault provider to be compatible with Vault 1.9 changes ([#1242](https://github.com/hashicorp/terraform-provider-vault/pull/1242))
+* `provider`: Encrypt logged HTTP secret header values ([#1250](https://github.com/hashicorp/terraform-provider-vault/pull/1250))
+* `provider`: Optionally log request and response bodies ([#1251](https://github.com/hashicorp/terraform-provider-vault/pull/1251))
+
+BUGS:
+* `resource/identity_group_policies`: Fix potential `nil` panic in type conversion for API policies ([#1245](https://github.com/hashicorp/terraform-provider-vault/pull/1245))
+* `resource/aws_secret_backend_role`: Fix for properly detecting changes in the JSON policy document ([#1014](https://github.com/hashicorp/terraform-provider-vault/pull/1014))
+
 ## 3.0.1 (November 23, 2021)
 
 BUGS:
-* `resource/aws_secret_backend_role_test`: Prevent invalid `policy_arns` from being created ([#1229](https://github.com/hashicorp/terraform-provider-vault/pull/1229))
+* `resource/aws_secret_backend_role`: Prevent invalid `policy_arns` from being created ([#1229](https://github.com/hashicorp/terraform-provider-vault/pull/1229))
 * `resource/approle_auth_backend_secret_id`: Handle `nil` `cidr_list` introduced in [vault-1.9.0](https://github.com/hashicorp/vault/issues/13226) ([#1230](https://github.com/hashicorp/terraform-provider-vault/pull/1230))
 * `resource/kubernetes_auth_backend_config`: Ensure `disable_iss_validation` is properly set in vault-1.9+ ([#1231](https://github.com/hashicorp/terraform-provider-vault/pull/1231))
 
@@ -16,6 +41,7 @@ IMPROVEMENTS:
 * `resource/jwt_auth_backend_role`: Add field `disable_bound_claims_parsing` to disable bound claim value parsing, which is useful when values contain commas ([#1200](https://github.com/hashicorp/terraform-provider-vault/pull/1200))
 * `resource/transform_template`: Add `encode_format` and `decode_formats` fields for `Vault Enterprise` with the `Advanced Data Protection Transform Module` ([#1214](https://github.com/hashicorp/terraform-provider-vault/pull/1214))
 * `data/generic_secret`: Store `lease_start_time` UTC. ([#1216](https://github.com/hashicorp/terraform-provider-vault/pull/1216))
+* `resource/identity_entity_alias`: Add support for configuring `custom_metadata`. ([#1235](https://github.com/hashicorp/terraform-provider-vault/pull/1235))
 
 BUGS:
 * `data/gcp_auth_backend_role`: Report an error when attempting to access a nonexistent role. ([#1184](https://github.com/hashicorp/terraform-provider-vault/pull/1184))
