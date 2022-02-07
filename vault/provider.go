@@ -604,14 +604,14 @@ var (
 			PathInventory: []string{"/identity/oidc/role/{name}"},
 		},
 		"vault_rabbitmq_secret_backend": {
-			Resource: rabbitmqSecretBackendResource(),
+			Resource: rabbitMQSecretBackendResource(),
 			PathInventory: []string{
 				"/rabbitmq/config/connection",
 				"/rabbitmq/config/lease",
 			},
 		},
 		"vault_rabbitmq_secret_backend_role": {
-			Resource:      rabbitmqSecretBackendRoleResource(),
+			Resource:      rabbitMQSecretBackendRoleResource(),
 			PathInventory: []string{"/rabbitmq/roles/{name}"},
 		},
 		"vault_password_policy": {
@@ -778,7 +778,11 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		return nil, fmt.Errorf("failed to configure Vault API: %s", err)
 	}
 
+	// setting this is critical for proper namespace handling
 	client.SetCloneHeaders(true)
+
+	// setting this is critical for proper client cloning
+	client.SetCloneToken(true)
 
 	// Set headers if provided
 	headers := d.Get("headers").([]interface{})

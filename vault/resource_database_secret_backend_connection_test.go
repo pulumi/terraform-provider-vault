@@ -15,21 +15,23 @@ import (
 	"github.com/hashicorp/vault/api"
 	mssqlhelper "github.com/hashicorp/vault/helper/testhelpers/mssql"
 	"github.com/hashicorp/vault/sdk/database/helper/dbutil"
+
+	"github.com/hashicorp/terraform-provider-vault/testutil"
 )
 
 func TestAccDatabaseSecretBackendConnection_import(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendPostgres)
-	connURL := os.Getenv("POSTGRES_URL")
-	if connURL == "" {
-		t.Skip("POSTGRES_URL not set")
-	}
+
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "POSTGRES_URL")
+	connURL := values[0]
 
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	userTempl := "{{.DisplayName}}"
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -63,10 +65,9 @@ func TestAccDatabaseSecretBackendConnection_import(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_cassandra(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendCassandra)
 
-	host := os.Getenv("CASSANDRA_HOST")
-	if host == "" {
-		t.Skip("CASSANDRA_HOST not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "CASSANDRA_HOST")
+	host := values[0]
 
 	username := os.Getenv("CASSANDRA_USERNAME")
 	password := os.Getenv("CASSANDRA_PASSWORD")
@@ -74,7 +75,7 @@ func TestAccDatabaseSecretBackendConnection_cassandra(t *testing.T) {
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -108,10 +109,9 @@ func TestAccDatabaseSecretBackendConnection_cassandra(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_cassandraProtocol(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendCassandra)
 
-	host := os.Getenv("CASSANDRA_HOST")
-	if host == "" {
-		t.Skip("CASSANDRA_HOST not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "CASSANDRA_HOST")
+	host := values[0]
 
 	username := os.Getenv("CASSANDRA_USERNAME")
 	password := os.Getenv("CASSANDRA_PASSWORD")
@@ -119,7 +119,7 @@ func TestAccDatabaseSecretBackendConnection_cassandraProtocol(t *testing.T) {
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -150,13 +150,59 @@ func TestAccDatabaseSecretBackendConnection_cassandraProtocol(t *testing.T) {
 	})
 }
 
+func TestAccDatabaseSecretBackendConnection_couchbase(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendCouchbase)
+
+	values := testutil.SkipTestEnvUnset(t, "COUCHBASE_HOST_1", "COUCHBASE_HOST_2", "COUCHBASE_USERNAME", "COUCHBASE_PASSWORD")
+	host1 := values[0]
+	host2 := values[1]
+	username := values[2]
+	password := values[3]
+	backend := acctest.RandomWithPrefix("tf-test-db")
+	name := acctest.RandomWithPrefix("db")
+	resourceName := "vault_database_secret_backend_connection.test"
+	resource.Test(t, resource.TestCase{
+		Providers:    testProviders,
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
+		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseSecretBackendConnectionConfig_couchbase(name, backend, host1, host2, username, password),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "name", name),
+					resource.TestCheckResourceAttr(resourceName, "backend", backend),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.0", "dev"),
+					resource.TestCheckResourceAttr(resourceName, "allowed_roles.1", "prod"),
+					resource.TestCheckResourceAttr(resourceName, "root_rotation_statements.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "root_rotation_statements.0", "FOOBAR"),
+					resource.TestCheckResourceAttr(resourceName, "verify_connection", "true"),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.hosts.#", "2"),
+					resource.TestCheckTypeSetElemAttr(resourceName, "couchbase.0.hosts.*", host1),
+					resource.TestCheckTypeSetElemAttr(resourceName, "couchbase.0.hosts.*", host2),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.username", username),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.password", password),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.tls", "false"),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.insecure_tls", "false"),
+					resource.TestCheckResourceAttr(resourceName, "couchbase.0.base64_pem", ""),
+				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"verify_connection", "couchbase.0.password"},
+			},
+		},
+	})
+}
+
 func TestAccDatabaseSecretBackendConnection_influxdb(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendInfluxDB)
 
-	host := os.Getenv("INFLUXDB_HOST")
-	if host == "" {
-		t.Skip("INFLUXDB_HOST not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "INFLUXDB_HOST")
+	host := values[0]
 
 	username := os.Getenv("INFLUXDB_USERNAME")
 	password := os.Getenv("INFLUXDB_PASSWORD")
@@ -165,7 +211,7 @@ func TestAccDatabaseSecretBackendConnection_influxdb(t *testing.T) {
 	resourceName := "vault_database_secret_backend_connection.test"
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -197,22 +243,21 @@ func TestAccDatabaseSecretBackendConnection_influxdb(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_mongodbatlas(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMongoDBAtlas)
 
-	public_key := os.Getenv("MONGODB_ATLAS_PUBLIC_KEY")
-	if public_key == "" {
-		t.Skip("MONGODB_ATLAS_PUBLIC_KEY not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "MONGODB_ATLAS_PUBLIC_KEY")
+	publicKey := values[0]
 
-	private_key := os.Getenv("MONGODB_ATLAS_PRIVATE_KEY")
-	project_id := os.Getenv("MONGODB_ATLAS_PROJECT_ID")
+	privateKey := os.Getenv("MONGODB_ATLAS_PRIVATE_KEY")
+	projectID := os.Getenv("MONGODB_ATLAS_PROJECT_ID")
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseSecretBackendConnectionConfig_mongodbatlas(name, backend, public_key, private_key, project_id),
+				Config: testAccDatabaseSecretBackendConnectionConfig_mongodbatlas(name, backend, publicKey, privateKey, projectID),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "name", name),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "backend", backend),
@@ -222,9 +267,9 @@ func TestAccDatabaseSecretBackendConnection_mongodbatlas(t *testing.T) {
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.#", "1"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.0", "FOOBAR"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "verify_connection", "true"),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.public_key", public_key),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.private_key", private_key),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.project_id", project_id),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.public_key", publicKey),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.private_key", privateKey),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mongodbatlas.0.project_id", projectID),
 				),
 			},
 		},
@@ -234,15 +279,15 @@ func TestAccDatabaseSecretBackendConnection_mongodbatlas(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_mongodb(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMongoDB)
 
-	connURL := os.Getenv("MONGODB_URL")
-	if connURL == "" {
-		t.Skip("MONGODB_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "MONGODB_URL")
+	connURL := values[0]
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -274,7 +319,7 @@ func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
 	name := acctest.RandomWithPrefix("db")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -320,16 +365,16 @@ func TestAccDatabaseSecretBackendConnection_mssql(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_mysql(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMySQL)
 
-	connURL := os.Getenv("MYSQL_URL")
-	if connURL == "" {
-		t.Skip("MYSQL_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "MYSQL_URL")
+	connURL := values[0]
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	password := acctest.RandomWithPrefix("password")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -409,16 +454,16 @@ func TestAccDatabaseSecretBackendConnection_mysql(t *testing.T) {
 func TestAccDatabaseSecretBackendConnectionUpdate_mysql(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMySQL)
 
-	connURL := os.Getenv("MYSQL_URL")
-	if connURL == "" {
-		t.Skip("MYSQL_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "MYSQL_URL")
+	connURL := values[0]
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	password := acctest.RandomWithPrefix("password")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -464,18 +509,13 @@ func TestAccDatabaseSecretBackendConnectionUpdate_mysql(t *testing.T) {
 func TestAccDatabaseSecretBackendConnectionTemplatedUpdateExcludePassword_mysql(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMySQL)
 
-	connURL := os.Getenv("MYSQL_CONNECTION_URL")
-	if connURL == "" {
-		t.Skip("MYSQL_CONNECTION_URL not set")
-	}
-	username := os.Getenv("MYSQL_CONNECTION_USERNAME")
-	if username == "" {
-		t.Skip("MYSQL_CONNECTION_USERNAME not set")
-	}
-	password := os.Getenv("MYSQL_CONNECTION_PASSWORD")
-	if password == "" {
-		t.Skip("MYSQL_CONNECTION_PASSWORD not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t,
+		"MYSQL_CONNECTION_URL",
+		"MYSQL_CONNECTION_USERNAME",
+		"MYSQL_CONNECTION_PASSWORD")
+
+	connURL, username, password := values[0], values[1], values[2]
 
 	// The MYQSL_CONNECTION_* vars are from within the test suite (might be different host due to docker)
 	// They are used to create test DB users
@@ -498,7 +538,7 @@ func TestAccDatabaseSecretBackendConnectionTemplatedUpdateExcludePassword_mysql(
 
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -549,28 +589,20 @@ func TestAccDatabaseSecretBackendConnectionTemplatedUpdateExcludePassword_mysql(
 func TestAccDatabaseSecretBackendConnection_mysql_tls(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendMySQL)
 
-	tls_ca := os.Getenv("MYSQL_CA")
-	if tls_ca == "" {
-		t.Skip("MYSQL_CA not set")
-	}
-	connURL := os.Getenv("MYSQL_URL")
-	if connURL == "" {
-		t.Skip("MYSQL_URL not set")
-	}
-	tls_certificate_key := os.Getenv("MYSQL_CERTIFICATE_KEY")
-	if tls_certificate_key == "" {
-		t.Skip("MYSQL_CERTIFICATE_KEY not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "MYSQL_CA", "MYSQL_URL", "MYSQL_CERTIFICATE_KEY")
+	tlsCA, connURL, tlsCertificateKey := values[0], values[1], values[2]
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	password := acctest.RandomWithPrefix("password")
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseSecretBackendConnectionConfig_mysql_tls(name, backend, connURL, password, tls_ca, tls_certificate_key),
+				Config: testAccDatabaseSecretBackendConnectionConfig_mysql_tls(name, backend, connURL, password, tlsCA, tlsCertificateKey),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "name", name),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "backend", backend),
@@ -586,8 +618,8 @@ func TestAccDatabaseSecretBackendConnection_mysql_tls(t *testing.T) {
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mysql.0.max_connection_lifetime", "0"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "data.%", "1"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "data.password", password),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mysql.0.tls_ca", tls_ca+"\n"),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mysql.0.tls_certificate_key", tls_certificate_key+"\n"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mysql.0.tlsCA", tlsCA+"\n"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "mysql.0.tls_certificate_key", tlsCertificateKey+"\n"),
 				),
 			},
 		},
@@ -597,16 +629,16 @@ func TestAccDatabaseSecretBackendConnection_mysql_tls(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_postgresql(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendPostgres)
 
-	connURL := os.Getenv("POSTGRES_URL")
-	if connURL == "" {
-		t.Skip("POSTGRES_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "POSTGRES_URL")
+	connURL := values[0]
+
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	userTempl := "{{.DisplayName}}"
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -634,10 +666,9 @@ func TestAccDatabaseSecretBackendConnection_postgresql(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_elasticsearch(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendElasticSearch)
 
-	connURL := os.Getenv("ELASTIC_URL")
-	if connURL == "" {
-		t.Skip("ELASTIC_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "ELASTIC_URL")
+	connURL := values[0]
 
 	username := os.Getenv("ELASTIC_USERNAME")
 	password := os.Getenv("ELASTIC_PASSWORD")
@@ -646,7 +677,7 @@ func TestAccDatabaseSecretBackendConnection_elasticsearch(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -668,20 +699,20 @@ func TestAccDatabaseSecretBackendConnection_elasticsearch(t *testing.T) {
 func TestAccDatabaseSecretBackendConnection_snowflake(t *testing.T) {
 	MaybeSkipDBTests(t, dbBackendSnowflake)
 
-	url := os.Getenv("SNOWFLAKE_URL")
-	if url == "" {
-		t.Skip("SNOWFLAKE_URL not set")
-	}
+	// TODO: make these fatal once we auto provision the required test infrastructure.
+	values := testutil.SkipTestEnvUnset(t, "SNOWFLAKE_URL")
+	connURL := values[0]
+
 	username := os.Getenv("SNOWFLAKE_USERNAME")
 	password := os.Getenv("SNOWFLAKE_PASSWORD")
 	backend := acctest.RandomWithPrefix("tf-test-db")
 	name := acctest.RandomWithPrefix("db")
 	userTempl := "{{.DisplayName}}"
 
-	config := testAccDatabaseSecretBackendConnectionConfig_snowflake(name, backend, url, username, password, userTempl)
+	config := testAccDatabaseSecretBackendConnectionConfig_snowflake(name, backend, connURL, username, password, userTempl)
 	resource.Test(t, resource.TestCase{
 		Providers:    testProviders,
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
 		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -693,10 +724,45 @@ func TestAccDatabaseSecretBackendConnection_snowflake(t *testing.T) {
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.0", "dev"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.1", "prod"),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "verify_connection", "true"),
-					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "snowflake.0.connection_url", url),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "snowflake.0.connection_url", connURL),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "snowflake.0.username", username),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "snowflake.0.password", password),
 					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "snowflake.0.username_template", userTempl),
+				),
+			},
+		},
+	})
+}
+
+func TestAccDatabaseSecretBackendConnection_redshift(t *testing.T) {
+	MaybeSkipDBTests(t, dbBackendRedshift)
+
+	url := os.Getenv("REDSHIFT_URL")
+	if url == "" {
+		t.Skip("REDSHIFT_URL not set")
+	}
+	backend := acctest.RandomWithPrefix("tf-test-db")
+	name := acctest.RandomWithPrefix("db")
+	resource.Test(t, resource.TestCase{
+		Providers:    testProviders,
+		PreCheck:     func() { testutil.TestAccPreCheck(t) },
+		CheckDestroy: testAccDatabaseSecretBackendConnectionCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseSecretBackendConnectionConfig_redshift(name, backend, url),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "name", name),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "backend", backend),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.#", "2"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.0", "dev"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "allowed_roles.1", "prod"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.#", "1"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "root_rotation_statements.0", "FOOBAR"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "verify_connection", "true"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "redshift.0.connection_url", url),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "redshift.0.max_open_connections", "2"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "redshift.0.max_idle_connections", "0"),
+					resource.TestCheckResourceAttr("vault_database_secret_backend_connection.test", "redshift.0.max_connection_lifetime", "0"),
 				),
 			},
 		},
@@ -789,6 +855,26 @@ resource "vault_database_secret_backend_connection" "test" {
   }
 }
 `, path, name, host, username, password)
+}
+
+func testAccDatabaseSecretBackendConnectionConfig_couchbase(name, path, host1, host2, username, password string) string {
+	return fmt.Sprintf(`
+resource "vault_mount" "db" {
+  path = "%s"
+  type = "database"
+}
+resource "vault_database_secret_backend_connection" "test" {
+  backend                  = vault_mount.db.path
+  name                     = "%s"
+  allowed_roles            = ["dev", "prod"]
+  root_rotation_statements = ["FOOBAR"]
+  couchbase {
+    hosts    = ["%s", "%s"]
+    username = "%s"
+    password = "%s"
+  }
+}
+`, path, name, host1, host2, username, password)
 }
 
 func testAccDatabaseSecretBackendConnectionConfig_elasticsearch(name, path, host, username, password string) string {
@@ -1094,6 +1180,24 @@ resource "vault_database_secret_backend_connection" "test" {
 `, path, name, url, username, password, userTempl)
 }
 
+func testAccDatabaseSecretBackendConnectionConfig_redshift(name, path, connURL string) string {
+	return fmt.Sprintf(`
+resource "vault_mount" "db" {
+  path = "%s"
+  type = "database"
+}
+resource "vault_database_secret_backend_connection" "test" {
+  backend = "${vault_mount.db.path}"
+  name = "%s"
+  allowed_roles = ["dev", "prod"]
+  root_rotation_statements = ["FOOBAR"]
+  redshift {
+	  connection_url = "%s"
+  }
+}
+`, path, name, connURL)
+}
+
 func newMySQLConnection(t *testing.T, connURL string, username string, password string) *sql.DB {
 	dbURL := dbutil.QueryHelper(connURL, map[string]string{
 		"username": username,
@@ -1131,6 +1235,9 @@ func deleteMySQLUser(t *testing.T, db *sql.DB, username string) {
 }
 
 func MaybeSkipDBTests(t *testing.T, engine string) {
+	// require TF_ACC to be set
+	testutil.SkipTestAcc(t)
+
 	envVars := []string{"SKIP_DB_TESTS"}
 	for _, e := range dbBackendTypes {
 		if e == engine {
@@ -1138,11 +1245,5 @@ func MaybeSkipDBTests(t *testing.T, engine string) {
 			break
 		}
 	}
-
-	for _, envVar := range envVars {
-		if os.Getenv(envVar) != "" {
-			t.Skipf("%s is set, skipping", envVar)
-			return
-		}
-	}
+	testutil.SkipTestEnvSet(t, envVars...)
 }

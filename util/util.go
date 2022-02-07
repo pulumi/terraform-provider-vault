@@ -6,17 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -99,96 +95,6 @@ func IsExpiredTokenErr(err error) bool {
 		return true
 	}
 	return false
-}
-
-func TestAccPreCheck(t *testing.T) {
-	if v := os.Getenv("VAULT_ADDR"); v == "" {
-		t.Fatal("VAULT_ADDR must be set for acceptance tests")
-	}
-	if v := os.Getenv("VAULT_TOKEN"); v == "" {
-		t.Fatal("VAULT_TOKEN must be set for acceptance tests")
-	}
-}
-
-func TestEntPreCheck(t *testing.T) {
-	isEnterprise := os.Getenv("TF_ACC_ENTERPRISE")
-	if isEnterprise == "" {
-		t.Skip("TF_ACC_ENTERPRISE is not set, test is applicable only for Enterprise version of Vault")
-	}
-	if v := os.Getenv("VAULT_ADDR"); v == "" {
-		t.Fatal("VAULT_ADDR must be set for acceptance tests")
-	}
-	if v := os.Getenv("VAULT_TOKEN"); v == "" {
-		t.Fatal("VAULT_TOKEN must be set for acceptance tests")
-	}
-}
-
-func GetTestADCreds(t *testing.T) (string, string, string) {
-	adBindDN := os.Getenv("AD_BINDDN")
-	adBindPass := os.Getenv("AD_BINDPASS")
-	adURL := os.Getenv("AD_URL")
-
-	if adBindDN == "" {
-		t.Skip("AD_BINDDN not set")
-	}
-	if adBindPass == "" {
-		t.Skip("AD_BINDPASS not set")
-	}
-	if adURL == "" {
-		t.Skip("AD_URL not set")
-	}
-	return adBindDN, adBindPass, adURL
-}
-
-func GetTestNomadCreds(t *testing.T) (string, string) {
-	address := os.Getenv("NOMAD_ADDR")
-	token := os.Getenv("NOMAD_TOKEN")
-
-	if address == "" {
-		t.Skip("NOMAD_ADDR not set")
-	}
-	if token == "" {
-		t.Skip("NOMAD_TOKEN not set")
-	}
-
-	return address, token
-}
-
-func TestCheckResourceAttrJSON(name, key, expectedValue string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		resourceState, ok := s.RootModule().Resources[name]
-		if !ok {
-			return fmt.Errorf("not found: %q", name)
-		}
-		instanceState := resourceState.Primary
-		if instanceState == nil {
-			return fmt.Errorf("%q has no primary instance state", name)
-		}
-		v, ok := instanceState.Attributes[key]
-		if !ok {
-			return fmt.Errorf("%s: attribute not found %q", name, key)
-		}
-		if expectedValue == "" && v == expectedValue {
-			return nil
-		}
-		if v == "" {
-			return fmt.Errorf("%s: attribute %q expected %#v, got %#v", name, key, expectedValue, v)
-		}
-
-		var stateJSON, expectedJSON interface{}
-		err := json.Unmarshal([]byte(v), &stateJSON)
-		if err != nil {
-			return fmt.Errorf("%s: attribute %q not JSON: %s", name, key, err)
-		}
-		err = json.Unmarshal([]byte(expectedValue), &expectedJSON)
-		if err != nil {
-			return fmt.Errorf("expected value %q not JSON: %s", expectedValue, err)
-		}
-		if !reflect.DeepEqual(stateJSON, expectedJSON) {
-			return fmt.Errorf("%s: attribute %q expected %#v, got %#v", name, key, expectedJSON, stateJSON)
-		}
-		return nil
-	}
 }
 
 func ShortDur(d time.Duration) string {
@@ -355,10 +261,7 @@ func StatusCheckRetry(statusCodes ...int) retryablehttp.CheckRetry {
 // SetupCCCRetryClient for handling Client Controlled Consistency related
 // requests.
 func SetupCCCRetryClient(client *api.Client, maxRetry int) {
-	if !client.ReadYourWrites() {
-		client.SetReadYourWrites(true)
-	}
-
+	client.SetReadYourWrites(true)
 	client.SetMaxRetries(maxRetry)
 	client.SetCheckRetry(StatusCheckRetry(http.StatusNotFound))
 
