@@ -71,9 +71,10 @@ func Provider() *schema.Provider {
 			},
 			"token": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("VAULT_TOKEN", ""),
 				Description: "Token to use to authenticate to Vault.",
+				Sensitive:   true,
 			},
 			"token_name": {
 				Type:        schema.TypeString,
@@ -870,9 +871,18 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	maxHTTPRetriesCCC = d.Get("max_retries_ccc").(int)
 
 	// Try an get the token from the config or token helper
-	token, err := providerToken(d)
+	var token string
+	providerToken, err := providerToken(d)
 	if err != nil {
 		return nil, err
+	}
+
+	// if the user has explicitly set a token - either via config or env var, then we should use that!
+	if providerToken != "" {
+		token = providerToken
+	} else {
+		// otherwise we use the token that the client has fetched initially
+		token = client.Token()
 	}
 
 	// Attempt to use auth/<mount>login if 'auth_login' is provided in provider config
