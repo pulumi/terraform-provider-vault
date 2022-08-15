@@ -7,12 +7,15 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/vault/api"
+
+	"github.com/hashicorp/terraform-provider-vault/internal/consts"
+	"github.com/hashicorp/terraform-provider-vault/internal/provider"
 )
 
 func awsSecretBackendResource() *schema.Resource {
 	return &schema.Resource{
 		Create: awsSecretBackendCreate,
-		Read:   awsSecretBackendRead,
+		Read:   ReadWrapper(awsSecretBackendRead),
 		Update: awsSecretBackendUpdate,
 		Delete: awsSecretBackendDelete,
 		Exists: awsSecretBackendExists,
@@ -21,7 +24,7 @@ func awsSecretBackendResource() *schema.Resource {
 		},
 
 		Schema: map[string]*schema.Schema{
-			"path": {
+			consts.FieldPath: {
 				Type:        schema.TypeString,
 				Optional:    true,
 				ForceNew:    true,
@@ -41,7 +44,6 @@ func awsSecretBackendResource() *schema.Resource {
 			"description": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				ForceNew:    true,
 				Description: "Human-friendly description of the mount for the backend.",
 			},
 			"default_lease_ttl_seconds": {
@@ -96,9 +98,12 @@ func awsSecretBackendResource() *schema.Resource {
 }
 
 func awsSecretBackendCreate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
-	path := d.Get("path").(string)
+	path := d.Get(consts.FieldPath).(string)
 	description := d.Get("description").(string)
 	defaultTTL := d.Get("default_lease_ttl_seconds").(int)
 	maxTTL := d.Get("max_lease_ttl_seconds").(int)
@@ -112,7 +117,7 @@ func awsSecretBackendCreate(d *schema.ResourceData, meta interface{}) error {
 	d.Partial(true)
 	log.Printf("[DEBUG] Mounting AWS backend at %q", path)
 	err := client.Sys().Mount(path, &api.MountInput{
-		Type:        "aws",
+		Type:        consts.MountTypeAWS,
 		Description: description,
 		Config: api.MountConfigInput{
 			DefaultLeaseTTL: fmt.Sprintf("%ds", defaultTTL),
@@ -156,7 +161,10 @@ func awsSecretBackendCreate(d *schema.ResourceData, meta interface{}) error {
 }
 
 func awsSecretBackendRead(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	path := d.Id()
 
@@ -217,7 +225,7 @@ func awsSecretBackendRead(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
-	d.Set("path", path)
+	d.Set(consts.FieldPath, path)
 	d.Set("description", mount.Description)
 	d.Set("default_lease_ttl_seconds", mount.Config.DefaultLeaseTTL)
 	d.Set("max_lease_ttl_seconds", mount.Config.MaxLeaseTTL)
@@ -226,7 +234,10 @@ func awsSecretBackendRead(d *schema.ResourceData, meta interface{}) error {
 }
 
 func awsSecretBackendUpdate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	path := d.Id()
 	d.Partial(true)
@@ -279,7 +290,10 @@ func awsSecretBackendUpdate(d *schema.ResourceData, meta interface{}) error {
 }
 
 func awsSecretBackendDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	path := d.Id()
 
@@ -293,7 +307,11 @@ func awsSecretBackendDelete(d *schema.ResourceData, meta interface{}) error {
 }
 
 func awsSecretBackendExists(d *schema.ResourceData, meta interface{}) (bool, error) {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return false, e
+	}
+
 	path := d.Id()
 	log.Printf("[DEBUG] Checking if AWS backend exists at %q", path)
 	mounts, err := client.Sys().ListMounts()

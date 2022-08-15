@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/hashicorp/vault/api"
 
+	"github.com/hashicorp/terraform-provider-vault/internal/provider"
 	"github.com/hashicorp/terraform-provider-vault/util"
 )
 
@@ -482,6 +483,7 @@ func getDatabaseSchema(typ schema.ValueType) schemaMap {
 			Description: "Connection parameters for the hana-database-plugin plugin.",
 			Elem: connectionStringResource(&connectionStringConfig{
 				excludeUsernameTemplate: true,
+				includeDisableEscaping:  true,
 				includeUserPass:         true,
 			}),
 			MaxItems:      1,
@@ -538,7 +540,8 @@ func getDatabaseSchema(typ schema.ValueType) schemaMap {
 			Optional:    true,
 			Description: "Connection parameters for the postgresql-database-plugin plugin.",
 			Elem: connectionStringResource(&connectionStringConfig{
-				includeUserPass: true,
+				includeUserPass:        true,
+				includeDisableEscaping: true,
 			}),
 			MaxItems:      1,
 			ConflictsWith: util.CalculateConflictsWith(dbEnginePostgres.Name(), dbEngineTypes),
@@ -558,7 +561,8 @@ func getDatabaseSchema(typ schema.ValueType) schemaMap {
 			Optional:    true,
 			Description: "Connection parameters for the redshift-database-plugin plugin.",
 			Elem: connectionStringResource(&connectionStringConfig{
-				includeUserPass: true,
+				includeUserPass:        true,
+				includeDisableEscaping: true,
 			}),
 			MaxItems:      1,
 			ConflictsWith: util.CalculateConflictsWith(dbEngineRedshift.Name(), dbEngineTypes),
@@ -593,7 +597,7 @@ func databaseSecretBackendConnectionResource() *schema.Resource {
 
 	return &schema.Resource{
 		Create: databaseSecretBackendConnectionCreateOrUpdate,
-		Read:   databaseSecretBackendConnectionRead,
+		Read:   ReadWrapper(databaseSecretBackendConnectionRead),
 		Update: databaseSecretBackendConnectionCreateOrUpdate,
 		Delete: databaseSecretBackendConnectionDelete,
 		Exists: databaseSecretBackendConnectionExists,
@@ -1017,11 +1021,10 @@ func getCouchbaseConnectionDetailsFromResponse(d *schema.ResourceData, prefix st
 	if v, ok := data["insecure_tls"]; ok {
 		result["insecure_tls"] = v.(bool)
 	}
-	if v, ok := data["base64_pem"]; ok {
-		result["base64_pem"] = v.(string)
-	} else if v, ok := d.GetOk(prefix + "base64_pem"); ok {
-		result["base64_pem"] = v.(string)
-	}
+
+	// base64_pem maps to base64pem in Vault
+	result["base64_pem"] = data["base64pem"]
+
 	if v, ok := data["bucket_name"]; ok {
 		result["bucket_name"] = v.(string)
 	}
@@ -1225,10 +1228,10 @@ func setCouchbaseDatabaseConnectionData(d *schema.ResourceData, prefix string, d
 		data["hosts"] = strings.Join(hosts, ",")
 	}
 	if v, ok := d.GetOk(prefix + "username"); ok {
-		data["username"] = v.(string)
+		data["username"] = v
 	}
 	if v, ok := d.GetOk(prefix + "password"); ok {
-		data["password"] = v.(string)
+		data["password"] = v
 	}
 	if v, ok := d.GetOkExists(prefix + "tls"); ok {
 		data["tls"] = v.(bool)
@@ -1236,14 +1239,15 @@ func setCouchbaseDatabaseConnectionData(d *schema.ResourceData, prefix string, d
 	if v, ok := d.GetOkExists(prefix + "insecure_tls"); ok {
 		data["insecure_tls"] = v.(bool)
 	}
-	if v, ok := d.GetOkExists(prefix + "base64_pem"); ok {
-		data["base64_pem"] = v.(string)
+	if v, ok := d.GetOk(prefix + "base64_pem"); ok {
+		// base64_pem maps to base64pem in Vault
+		data["base64pem"] = v
 	}
-	if v, ok := d.GetOkExists(prefix + "bucket_name"); ok {
-		data["bucket_name"] = v.(string)
+	if v, ok := d.GetOk(prefix + "bucket_name"); ok {
+		data["bucket_name"] = v
 	}
-	if v, ok := d.GetOkExists(prefix + "username_template"); ok {
-		data["username_template"] = v.(int)
+	if v, ok := d.GetOk(prefix + "username_template"); ok {
+		data["username_template"] = v
 	}
 }
 
@@ -1301,7 +1305,10 @@ func setDatabaseConnectionDataWithDisableEscaping(d *schema.ResourceData, prefix
 func databaseSecretBackendConnectionCreateOrUpdate(
 	d *schema.ResourceData, meta interface{},
 ) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	engine, err := getDBEngine(d)
 	if err != nil {
@@ -1408,7 +1415,10 @@ func getSortedPluginPrefixes() ([]string, error) {
 }
 
 func databaseSecretBackendConnectionRead(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	path := d.Id()
 
@@ -1500,7 +1510,8 @@ func getDBCommonConfig(d *schema.ResourceData, resp *api.Secret,
 }
 
 func getDBConnectionConfig(d *schema.ResourceData, engine *dbEngine, idx int,
-	resp *api.Secret) (map[string]interface{}, error) {
+	resp *api.Secret,
+) (map[string]interface{}, error) {
 	var result map[string]interface{}
 
 	prefix := engine.ResourcePrefix(idx)
@@ -1629,7 +1640,11 @@ func getConnectionDetailsMongoDBAtlas(d *schema.ResourceData, prefix string, res
 }
 
 func databaseSecretBackendConnectionDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
+
 	path := d.Id()
 
 	log.Printf("[DEBUG] Removing database connection config %q", path)
@@ -1643,7 +1658,10 @@ func databaseSecretBackendConnectionDelete(d *schema.ResourceData, meta interfac
 }
 
 func databaseSecretBackendConnectionExists(d *schema.ResourceData, meta interface{}) (bool, error) {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return false, e
+	}
 
 	path := d.Id()
 

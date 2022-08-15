@@ -8,6 +8,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/vault/api"
+
+	"github.com/hashicorp/terraform-provider-vault/internal/provider"
 )
 
 type schemaMap map[string]*schema.Schema
@@ -30,7 +32,6 @@ func getMountSchema(excludes ...string) schemaMap {
 			Type:        schema.TypeString,
 			Optional:    true,
 			Required:    false,
-			ForceNew:    false,
 			Description: "Human-friendly description of the mount",
 		},
 		"default_lease_ttl_seconds": {
@@ -119,7 +120,7 @@ func MountResource() *schema.Resource {
 		Create: mountWrite,
 		Update: mountUpdate,
 		Delete: mountDelete,
-		Read:   mountRead,
+		Read:   ReadWrapper(mountRead),
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
 		},
@@ -128,7 +129,10 @@ func MountResource() *schema.Resource {
 }
 
 func mountWrite(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, err := provider.GetClient(d, meta)
+	if err != nil {
+		return err
+	}
 
 	path := d.Get("path").(string)
 	if err := createMount(d, client, path, d.Get("type").(string)); err != nil {
@@ -171,7 +175,14 @@ func createMount(d *schema.ResourceData, client *api.Client, path string, mountT
 }
 
 func mountUpdate(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	return updateMount(d, meta, false)
+}
+
+func updateMount(d *schema.ResourceData, meta interface{}, excludeType bool) error {
+	client, err := provider.GetClient(d, meta)
+	if err != nil {
+		return err
+	}
 
 	config := api.MountConfigInput{
 		DefaultLeaseTTL: fmt.Sprintf("%ds", d.Get("default_lease_ttl_seconds")),
@@ -224,11 +235,14 @@ func mountUpdate(d *schema.ResourceData, meta interface{}) error {
 		break
 	}
 
-	return mountRead(d, meta)
+	return readMount(d, meta, excludeType)
 }
 
 func mountDelete(d *schema.ResourceData, meta interface{}) error {
-	client := meta.(*api.Client)
+	client, err := provider.GetClient(d, meta)
+	if err != nil {
+		return err
+	}
 
 	path := d.Id()
 
@@ -246,7 +260,10 @@ func mountRead(d *schema.ResourceData, meta interface{}) error {
 }
 
 func readMount(d *schema.ResourceData, meta interface{}, excludeType bool) error {
-	client := meta.(*api.Client)
+	client, e := provider.GetClient(d, meta)
+	if e != nil {
+		return e
+	}
 
 	path := d.Id()
 
