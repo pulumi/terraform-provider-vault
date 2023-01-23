@@ -133,6 +133,7 @@ func TestAuthLoginGCP_Login(t *testing.T) {
 						consts.FieldJWT:  "jwt",
 						consts.FieldRole: "bob",
 					},
+					initialized: true,
 				},
 			},
 			handler: &testLoginHandler{
@@ -166,6 +167,7 @@ func TestAuthLoginGCP_Login(t *testing.T) {
 						consts.FieldCredentials:    os.Getenv(consts.EnvVarGoogleApplicationCreds),
 						consts.FieldServiceAccount: os.Getenv(envVarGCPServiceAccount),
 					},
+					initialized: true,
 				},
 			},
 			handler: &testLoginHandler{
@@ -177,9 +179,7 @@ func TestAuthLoginGCP_Login(t *testing.T) {
 				"/v1/auth/qux/login",
 			},
 			expectReqParams: []map[string]interface{}{{
-				consts.FieldRole:           "bob",
-				consts.FieldCredentials:    os.Getenv(consts.EnvVarGoogleApplicationCreds),
-				consts.FieldServiceAccount: os.Getenv(envVarGCPServiceAccount),
+				consts.FieldRole: "bob",
 			}},
 			want: &api.Secret{
 				Auth: &api.SecretAuth{
@@ -208,6 +208,20 @@ func TestAuthLoginGCP_Login(t *testing.T) {
 			expectReqParams: nil,
 			want:            nil,
 			wantErr:         true,
+		},
+		{
+			name: "error-uninitialized",
+			authLogin: &AuthLoginGCP{
+				AuthLoginCommon{
+					initialized: false,
+				},
+			},
+			handler: &testLoginHandler{
+				handlerFunc: handlerFunc,
+			},
+			want:      nil,
+			wantErr:   true,
+			expectErr: authLoginInitCheckError,
 		},
 	}
 	for _, tt := range tests {

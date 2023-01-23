@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/coreos/pkg/multierror"
@@ -19,8 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
 	"github.com/mitchellh/go-homedir"
-
-	goversion "github.com/hashicorp/go-version"
 
 	"github.com/hashicorp/terraform-provider-vault/internal/consts"
 )
@@ -194,21 +193,6 @@ func GetTestNomadCreds(t *testing.T) (string, string) {
 	return v[0], v[1]
 }
 
-// Returns true if TF_VAULT_VERSION is greater than or equal to the given Vault version
-func CheckTestVaultVersion(t *testing.T, cutoff string) bool {
-	v := SkipTestEnvUnset(t, "TF_VAULT_VERSION")
-
-	cutoffVersion, _ := goversion.NewVersion(cutoff)
-	envVersion, err := goversion.NewVersion(v[0])
-	if err != nil {
-		t.Fatalf("error parsing vault version from TF_VAULT_VERSION environment variable: %v", err)
-	} else {
-		return envVersion.GreaterThanOrEqual(cutoffVersion)
-	}
-
-	return false
-}
-
 func TestCheckResourceAttrJSON(name, key, expectedValue string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		resourceState, ok := s.RootModule().Resources[name]
@@ -255,17 +239,16 @@ type GHOrgResponse struct {
 }
 
 // cache GH API responses to avoid triggering the GH request rate limiter
-var ghOrgResponseCache = map[string]*GHOrgResponse{}
+var ghOrgResponseCache = sync.Map{}
 
 // GetGHOrgResponse returns the GH org's meta configuration.
 func GetGHOrgResponse(t *testing.T, org string) *GHOrgResponse {
 	t.Helper()
 
-	if v, ok := ghOrgResponseCache[org]; ok {
-		return v
-	}
-
 	client := newGHRESTClient()
+	if v, ok := ghOrgResponseCache.Load(org); ok {
+		return v.(*GHOrgResponse)
+	}
 
 	result := &GHOrgResponse{}
 	if err := client.get(fmt.Sprintf("orgs/%s", org), result); err != nil {
@@ -276,7 +259,7 @@ func GetGHOrgResponse(t *testing.T, org string) *GHOrgResponse {
 		t.Fatalf("expected org %q from GH API response, actual %q", org, result.Login)
 	}
 
-	ghOrgResponseCache[org] = result
+	ghOrgResponseCache.Store(org, result)
 
 	return result
 }
@@ -305,6 +288,11 @@ func (c *ghRESTClient) do(method, path string, v interface{}) error {
 	}
 
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err

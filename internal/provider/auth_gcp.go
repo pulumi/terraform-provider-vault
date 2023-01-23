@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/vault/sdk/helper/useragent"
 	"github.com/mitchellh/go-homedir"
 	googleoauth "golang.org/x/oauth2/google"
+	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 	credentialspb "google.golang.org/genproto/googleapis/iam/credentials/v1"
 
@@ -91,17 +92,26 @@ func (l *AuthLoginGCP) Method() string {
 
 // Login using the gcp authentication engine.
 func (l *AuthLoginGCP) Login(client *api.Client) (*api.Secret, error) {
+	if err := l.validate(); err != nil {
+		return nil, err
+	}
+
+	params, err := l.copyParamsExcluding(
+		consts.FieldNamespace,
+		consts.FieldMount,
+		consts.FieldJWT,
+		consts.FieldCredentials,
+		consts.FieldServiceAccount,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := context.Background()
 	jwt, err := l.getJWT(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	params := l.copyParamsExcluding(
-		consts.FieldNamespace,
-		consts.FieldMount,
-		consts.FieldJWT,
-	)
 
 	params[consts.FieldJWT] = jwt
 
@@ -116,7 +126,7 @@ func (l *AuthLoginGCP) getJWT(ctx context.Context) (string, error) {
 
 	if v, ok := l.params[consts.FieldCredentials]; ok && v.(string) != "" {
 		// get the token from IAM
-		creds, err := getGCPOauthCredentials(ctx, v.(string))
+		creds, err := getGCPOauthCredentials(ctx, v.(string), iam.CloudPlatformScope)
 		if err != nil {
 			return "", fmt.Errorf(
 				"JSON credentials are not valid, err=%w", err)
