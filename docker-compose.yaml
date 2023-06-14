@@ -45,3 +45,31 @@ services:
       "DOCKER_INFLUXDB_INIT_PASSWORD": "password"
       "DOCKER_INFLUXDB_INIT_ORG": "test"
       "DOCKER_INFLUXDB_INIT_BUCKET": "test"
+
+  openldap:
+    image: docker.io/bitnami/openldap:2.6
+    ports:
+      - '1389:1389'
+      - '1636:1636'
+    environment:
+      - LDAP_ADMIN_USERNAME=admin
+      - LDAP_ADMIN_PASSWORD=adminpassword
+      - LDAP_USERS=alice,bob,foo
+      - LDAP_PASSWORDS=password1,password2,password3
+
+  # this container will take at least 20 seconds for the ad service to be
+  # available so manual test runs should take this into account
+  ad:
+    image: laslabs/alpine-samba-dc:0.1.0
+    cap_add:
+    - "SYS_ADMIN"
+    ports:
+      - '2389:389'
+      - '2636:636'
+    environment:
+      - SAMBA_DC_REALM=corp.example.net
+      - SAMBA_DC_DOMAIN=EXAMPLE
+      - SAMBA_DC_ADMIN_PASSWD=SuperSecretPassw0rd
+      - SAMBA_DC_DNS_BACKEND=SAMBA_INTERNAL
+
+
