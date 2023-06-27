@@ -11,10 +11,15 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/vault/api"
 
 	"github.com/hashicorp/terraform-provider-vault/testutil"
 )
+
+// expectedRegisteredAuthLogin value should be modified when adding
+// registering/de-registering AuthLogin resources.
+const expectedRegisteredAuthLogin = 11
 
 type authLoginTest struct {
 	name               string
@@ -28,6 +33,16 @@ type authLoginTest struct {
 	wantErr            bool
 	expectErr          error
 	skipFunc           func(t *testing.T)
+}
+
+type authLoginInitTest struct {
+	name         string
+	authField    string
+	raw          map[string]interface{}
+	wantErr      bool
+	expectMount  string
+	expectParams map[string]interface{}
+	expectErr    error
 }
 
 type testLoginHandler struct {
@@ -115,5 +130,107 @@ func testAuthLogin(t *testing.T, tt authLoginTest) {
 
 	if !reflect.DeepEqual(got, tt.want) {
 		t.Errorf("Login() got = %#v, want %#v", got, tt.want)
+	}
+}
+
+// TestMustAddAuthLoginSchema_registered is only meant to validate that all
+// expected AuthLogin(s) are registered. The expected count of all registered
+// entries should be modified when registering/de-registering AuthLogin
+// resources.
+func TestMustAddAuthLoginSchema_registered(t *testing.T) {
+	tests := []struct {
+		name string
+		s    map[string]*schema.Schema
+	}{
+		{
+			name: "checkRegistered",
+			s:    make(map[string]*schema.Schema),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			MustAddAuthLoginSchema(tt.s)
+			actual := len(tt.s)
+			if expectedRegisteredAuthLogin != actual {
+				t.Errorf("expected %d schema entries, actual %d", expectedRegisteredAuthLogin, actual)
+			}
+		})
+	}
+}
+
+func TestGetAuthLogin_registered(t *testing.T) {
+	registeredAuthLogins := globalAuthLoginRegistry.Values()
+	actualRegistered := len(registeredAuthLogins)
+	if expectedRegisteredAuthLogin != actualRegistered {
+		t.Fatalf("expected %d registered AuthLogin, actual %d", expectedRegisteredAuthLogin, actualRegistered)
+	}
+
+	for _, entry := range registeredAuthLogins {
+		entry := entry
+		t.Run(t.Name()+"-"+entry.Field(), func(t *testing.T) {
+			t.Parallel()
+			sr := entry.LoginSchema().Elem.(*schema.Resource)
+
+			rawData := []map[string]interface{}{
+				make(map[string]interface{}),
+			}
+			for f, s := range sr.Schema {
+				switch s.Type {
+				case schema.TypeString:
+					rawData[0][f] = t.Name()
+				case schema.TypeMap:
+					rawData[0][f] = map[string]interface{}{
+						t.Name(): "baz",
+					}
+				case schema.TypeBool:
+					continue
+				default:
+					t.Fatalf("unsupported schema type %s for test", s.Type)
+				}
+			}
+
+			rootProvider := NewProvider(nil, nil)
+			pr := &schema.Resource{
+				Schema: rootProvider.Schema,
+			}
+			d := pr.TestResourceData()
+			if err := d.Set(entry.Field(), rawData); err != nil {
+				t.Error(err)
+			}
+
+			_, err := GetAuthLogin(d)
+			if err != nil {
+				t.Errorf("GetAuthLogin() error = %v, wantErr false", err)
+			}
+		})
+	}
+}
+
+func assertAuthLoginEqual(t *testing.T, expected, actual AuthLogin) {
+	t.Helper()
+	if !reflect.DeepEqual(expected, actual) {
+		t.Errorf("AuthLogin instances not equal, expected %#v, actual %#v", expected, actual)
+	}
+}
+
+func assertAuthLoginInit(t *testing.T, tt authLoginInitTest, s map[string]*schema.Schema, l AuthLogin) {
+	d := schema.TestResourceDataRaw(t, s, tt.raw)
+	actual, err := l.Init(d, tt.authField)
+	if (err != nil) != tt.wantErr {
+		t.Fatalf("Init() error = %v, wantErr %v", err, tt.wantErr)
+	}
+
+	if !reflect.DeepEqual(tt.expectErr, err) {
+		t.Errorf("Init() expected error %#v, actual %#v", tt.expectErr, err)
+	}
+
+	if !reflect.DeepEqual(tt.expectParams, l.Params()) {
+		t.Errorf("Init() expected params %#v, actual %#v", tt.expectParams, l.Params())
+	}
+
+	if err != nil {
+		assertAuthLoginEqual(t, nil, actual)
+	} else {
+		assertAuthLoginEqual(t, l, actual)
 	}
 }

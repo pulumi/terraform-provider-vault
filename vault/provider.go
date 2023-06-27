@@ -81,6 +81,10 @@ var (
 			Resource:      UpdateSchemaResource(awsAccessCredentialsDataSource()),
 			PathInventory: []string{"/aws/creds"},
 		},
+		"vault_aws_static_access_credentials": {
+			Resource:      UpdateSchemaResource(awsStaticCredDataSource()),
+			PathInventory: []string{"/aws/static-creds/{name}"},
+		},
 		"vault_azure_access_credentials": {
 			Resource:      UpdateSchemaResource(azureAccessCredentialsDataSource()),
 			PathInventory: []string{"/azure/creds/{role}"},
@@ -152,6 +156,22 @@ var (
 		"vault_raft_autopilot_state": {
 			Resource:      UpdateSchemaResource(raftAutopilotStateDataSource()),
 			PathInventory: []string{"/sys/storage/raft/autopilot/state"},
+		},
+		"vault_pki_secret_backend_issuer": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendIssuerDataSource()),
+			PathInventory: []string{"/pki/issuer/{issuer_ref}"},
+		},
+		"vault_pki_secret_backend_issuers": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendIssuersDataSource()),
+			PathInventory: []string{"/pki/issuers"},
+		},
+		"vault_pki_secret_backend_key": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendKeyDataSource()),
+			PathInventory: []string{"/pki/key/{key_ref}"},
+		},
+		"vault_pki_secret_backend_keys": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendKeysDataSource()),
+			PathInventory: []string{"/pki/keys"},
 		},
 	}
 
@@ -246,6 +266,10 @@ var (
 		"vault_aws_secret_backend_role": {
 			Resource:      UpdateSchemaResource(awsSecretBackendRoleResource("vault_aws_secret_backend_role")),
 			PathInventory: []string{"/aws/roles/{name}"},
+		},
+		"vault_aws_secret_backend_static_role": {
+			Resource:      UpdateSchemaResource(awsSecretBackendStaticRoleResource()),
+			PathInventory: []string{"/aws/static-roles/{name}"},
 		},
 		"vault_azure_secret_backend": {
 			Resource:      UpdateSchemaResource(azureSecretBackendResource()),
@@ -564,6 +588,14 @@ var (
 		"vault_pki_secret_backend_sign": {
 			Resource:      UpdateSchemaResource(pkiSecretBackendSignResource()),
 			PathInventory: []string{"/pki/sign/{role}"},
+		},
+		"vault_pki_secret_backend_key": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendKeyResource()),
+			PathInventory: []string{"/pki/key/{key_id}"},
+		},
+		"vault_pki_secret_backend_issuer": {
+			Resource:      UpdateSchemaResource(pkiSecretBackendIssuerResource()),
+			PathInventory: []string{"/pki/issuer/{issuer_ref}"},
 		},
 		"vault_quota_lease_count": {
 			Resource:      UpdateSchemaResource(quotaLeaseCountResource()),
