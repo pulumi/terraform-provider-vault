@@ -20,6 +20,11 @@ var ErrReadOnly = errors.New("cannot write to readonly storage")
 // storage while the backend is still being setup.
 var ErrSetupReadOnly = errors.New("cannot write to storage during setup")
 
+// Plugins using Paths.WriteForwardedStorage will need to use this sentinel
+// in their path to write cross-cluster. See the description of that parameter
+// for more information.
+const PBPWFClusterSentinel = "{{clusterId}}"
+
 // Storage is the way that logical backends are able read/write data.
 type Storage interface {
 	List(context.Context, string) ([]string, error)
@@ -74,6 +79,10 @@ func ScanView(ctx context.Context, view ClearableView, cb func(path string)) err
 
 		// Handle the contents in the directory
 		for _, c := range contents {
+			// Exit if the context has been canceled
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			fullPath := current + c
 			if strings.HasSuffix(c, "/") {
 				frontier = append(frontier, fullPath)

@@ -81,7 +81,7 @@ func RespondErrorCommon(req *Request, resp *Response, err error) (int, error) {
 			}
 		})
 		if allErrors != nil {
-			return codedErr.Code, multierror.Append(errors.New(fmt.Sprintf("errors from both primary and secondary; primary error was %v; secondary errors follow", codedErr.Msg)), allErrors)
+			return codedErr.Code, multierror.Append(fmt.Errorf("errors from both primary and secondary; primary error was %v; secondary errors follow", codedErr.Msg), allErrors)
 		}
 		return codedErr.Code, errors.New(codedErr.Msg)
 	}
@@ -102,6 +102,8 @@ func RespondErrorCommon(req *Request, resp *Response, err error) (int, error) {
 			statusCode = http.StatusBadRequest
 		case errwrap.Contains(err, ErrPermissionDenied.Error()):
 			statusCode = http.StatusForbidden
+		case errwrap.Contains(err, consts.ErrInvalidWrappingToken.Error()):
+			statusCode = http.StatusBadRequest
 		case errwrap.Contains(err, ErrUnsupportedOperation.Error()):
 			statusCode = http.StatusMethodNotAllowed
 		case errwrap.Contains(err, ErrUnsupportedPath.Error()):
@@ -110,6 +112,18 @@ func RespondErrorCommon(req *Request, resp *Response, err error) (int, error) {
 			statusCode = http.StatusBadRequest
 		case errwrap.Contains(err, ErrUpstreamRateLimited.Error()):
 			statusCode = http.StatusBadGateway
+		case errwrap.Contains(err, ErrRateLimitQuotaExceeded.Error()):
+			statusCode = http.StatusTooManyRequests
+		case errwrap.Contains(err, ErrLeaseCountQuotaExceeded.Error()):
+			statusCode = http.StatusTooManyRequests
+		case errwrap.Contains(err, ErrMissingRequiredState.Error()):
+			statusCode = http.StatusPreconditionFailed
+		case errwrap.Contains(err, ErrPathFunctionalityRemoved.Error()):
+			statusCode = http.StatusNotFound
+		case errwrap.Contains(err, ErrRelativePath.Error()):
+			statusCode = http.StatusBadRequest
+		case errwrap.Contains(err, ErrInvalidCredentials.Error()):
+			statusCode = http.StatusBadRequest
 		}
 	}
 
@@ -133,6 +147,10 @@ func AdjustErrorStatusCode(status *int, err error) {
 
 	// Adjust status code when sealed
 	if errwrap.Contains(err, consts.ErrSealed.Error()) {
+		*status = http.StatusServiceUnavailable
+	}
+
+	if errwrap.Contains(err, consts.ErrAPILocked.Error()) {
 		*status = http.StatusServiceUnavailable
 	}
 
@@ -160,6 +178,26 @@ func RespondError(w http.ResponseWriter, status int, err error) {
 	if err != nil {
 		resp.Errors = append(resp.Errors, err.Error())
 	}
+
+	enc := json.NewEncoder(w)
+	enc.Encode(resp)
+}
+
+func RespondErrorAndData(w http.ResponseWriter, status int, data interface{}, err error) {
+	AdjustErrorStatusCode(&status, err)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	type ErrorAndDataResponse struct {
+		Errors []string    `json:"errors"`
+		Data   interface{} `json:"data""`
+	}
+	resp := &ErrorAndDataResponse{Errors: make([]string, 0, 1)}
+	if err != nil {
+		resp.Errors = append(resp.Errors, err.Error())
+	}
+	resp.Data = data
 
 	enc := json.NewEncoder(w)
 	enc.Encode(resp)

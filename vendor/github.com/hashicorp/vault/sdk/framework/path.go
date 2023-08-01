@@ -56,12 +56,24 @@ type Path struct {
 	Pattern string
 
 	// Fields is the mapping of data fields to a schema describing that
-	// field. Named captures in the Pattern also map to fields. If a named
-	// capture name matches a PUT body name, the named capture takes
-	// priority.
+	// field.
 	//
-	// Note that only named capture fields are available in every operation,
-	// whereas all fields are available in the Write operation.
+	// Field values are obtained from:
+	//
+	// - Named captures in the Pattern.
+	//
+	// - Parameters in the HTTP request body, for HTTP methods where a
+	//   request body is expected, i.e. PUT/POST/PATCH. The request body is
+	//   typically formatted as JSON, though
+	//   "application/x-www-form-urlencoded" format can also be accepted.
+	//
+	// - Parameters in the HTTP URL query-string, for HTTP methods where
+	//   there is no request body, i.e. GET/LIST/DELETE. The query-string
+	//   is *not* parsed at all for PUT/POST/PATCH requests.
+	//
+	// Should the same field be specified both as a named capture and as
+	// a parameter, the named capture takes precedence, and a warning is
+	// returned.
 	Fields map[string]*FieldSchema
 
 	// Operations is the set of operations supported and the associated OperationsHandler.
@@ -116,6 +128,12 @@ type Path struct {
 	// DisplayAttrs provides hints for UI and documentation generators. They
 	// will be included in OpenAPI output if set.
 	DisplayAttrs *DisplayAttributes
+
+	// TakesArbitraryInput is used for endpoints that take arbitrary input, instead
+	// of or as well as their Fields. This is taken into account when printing
+	// warnings about ignored fields. If this is set, we will not warn when data is
+	// provided that is not part of the Fields declaration.
+	TakesArbitraryInput bool
 }
 
 // OperationHandler defines and describes a specific operation handler.
@@ -153,6 +171,30 @@ type OperationProperties struct {
 	// Deprecated indicates that this operation should be avoided.
 	Deprecated bool
 
+	// The ForwardPerformance* parameters tell the router to unconditionally forward requests
+	// to this path if the processing node is a performance secondary/standby. This is generally
+	// *not* needed as there is already handling in place to automatically forward requests
+	// that try to write to storage. But there are a few cases where explicit forwarding is needed,
+	// for example:
+	//
+	// * The handler makes requests to other systems (e.g. an external API, database, ...) that
+	//   change external state somehow, and subsequently writes to storage. In this case the
+	//   default forwarding logic could result in multiple mutative calls to the external system.
+	//
+	// * The operation spans multiple requests (e.g. an OIDC callback), in-memory caching used,
+	//   and the same node (and therefore cache) should process both steps.
+	//
+	// If explicit forwarding is needed, it is usually true that forwarding from both performance
+	// standbys and performance secondaries should be enabled.
+	//
+	// ForwardPerformanceStandby indicates that this path should not be processed
+	// on a performance standby node, and should be forwarded to the active node instead.
+	ForwardPerformanceStandby bool
+
+	// ForwardPerformanceSecondary indicates that this path should not be processed
+	// on a performance secondary node, and should be forwarded to the active node instead.
+	ForwardPerformanceSecondary bool
+
 	// DisplayAttrs provides hints for UI and documentation generators. They
 	// will be included in OpenAPI output if set.
 	DisplayAttrs *DisplayAttributes
@@ -173,11 +215,18 @@ type DisplayAttributes struct {
 	// Navigation indicates that the path should be available as a navigation tab
 	Navigation bool `json:"navigation,omitempty"`
 
+	// ItemType is the type of item this path operates on
+	ItemType string `json:"itemType,omitempty"`
+
 	// Group is the suggested UI group to place this field in.
 	Group string `json:"group,omitempty"`
 
 	// Action is the verb to use for the operation.
 	Action string `json:"action,omitempty"`
+
+	// EditType is the optional type of form field needed for a property
+	// This is only necessary for a "textarea" or "file"
+	EditType string `json:"editType,omitempty"`
 }
 
 // RequestExample is example of request data.
@@ -192,20 +241,23 @@ type RequestExample struct {
 
 // Response describes and optional demonstrations an operation response.
 type Response struct {
-	Description string            // summary of the the response and should always be provided
-	MediaType   string            // media type of the response, defaulting to "application/json" if empty
-	Example     *logical.Response // example response data
+	Description string                  // summary of the the response and should always be provided
+	MediaType   string                  // media type of the response, defaulting to "application/json" if empty
+	Fields      map[string]*FieldSchema // the fields present in this response, used to generate openapi response
+	Example     *logical.Response       // example response data
 }
 
 // PathOperation is a concrete implementation of OperationHandler.
 type PathOperation struct {
-	Callback    OperationFunc
-	Summary     string
-	Description string
-	Examples    []RequestExample
-	Responses   map[int][]Response
-	Unpublished bool
-	Deprecated  bool
+	Callback                    OperationFunc
+	Summary                     string
+	Description                 string
+	Examples                    []RequestExample
+	Responses                   map[int][]Response
+	Unpublished                 bool
+	Deprecated                  bool
+	ForwardPerformanceSecondary bool
+	ForwardPerformanceStandby   bool
 }
 
 func (p *PathOperation) Handler() OperationFunc {
@@ -214,12 +266,14 @@ func (p *PathOperation) Handler() OperationFunc {
 
 func (p *PathOperation) Properties() OperationProperties {
 	return OperationProperties{
-		Summary:     strings.TrimSpace(p.Summary),
-		Description: strings.TrimSpace(p.Description),
-		Responses:   p.Responses,
-		Examples:    p.Examples,
-		Unpublished: p.Unpublished,
-		Deprecated:  p.Deprecated,
+		Summary:                     strings.TrimSpace(p.Summary),
+		Description:                 strings.TrimSpace(p.Description),
+		Responses:                   p.Responses,
+		Examples:                    p.Examples,
+		Unpublished:                 p.Unpublished,
+		Deprecated:                  p.Deprecated,
+		ForwardPerformanceSecondary: p.ForwardPerformanceSecondary,
+		ForwardPerformanceStandby:   p.ForwardPerformanceStandby,
 	}
 }
 
@@ -239,7 +293,7 @@ func (p *Path) helpCallback(b *Backend) OperationFunc {
 
 		// Alphabetize the fields
 		fieldKeys := make([]string, 0, len(p.Fields))
-		for k, _ := range p.Fields {
+		for k := range p.Fields {
 			fieldKeys = append(fieldKeys, k)
 		}
 		sort.Strings(fieldKeys)
@@ -266,9 +320,29 @@ func (p *Path) helpCallback(b *Backend) OperationFunc {
 			return nil, errwrap.Wrapf("error executing template: {{err}}", err)
 		}
 
+		// The plugin type (e.g. "kv", "cubbyhole") is only assigned at the time
+		// the plugin is enabled (mounted). If specified in the request, the type
+		// will be used as part of the request/response names in the OAS document
+		var requestResponsePrefix string
+		if v, ok := req.Data["requestResponsePrefix"]; ok {
+			requestResponsePrefix = v.(string)
+		}
+
 		// Build OpenAPI response for this path
-		doc := NewOASDocument()
-		if err := documentPath(p, b.SpecialPaths(), b.BackendType, doc); err != nil {
+		vaultVersion := "unknown"
+		if b.System() != nil {
+			// b.System() should always be non-nil, except tests might create a
+			// Backend without one.
+			env, err := b.System().PluginEnv(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			if env != nil {
+				vaultVersion = env.VaultVersion
+			}
+		}
+		doc := NewOASDocument(vaultVersion)
+		if err := documentPath(p, b.SpecialPaths(), requestResponsePrefix, b.BackendType, doc); err != nil {
 			b.Logger().Warn("error generating OpenAPI", "error", err)
 		}
 

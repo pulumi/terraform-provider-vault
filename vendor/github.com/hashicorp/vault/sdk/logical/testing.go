@@ -73,6 +73,7 @@ func TestSystemView() *StaticSystemView {
 	return &StaticSystemView{
 		DefaultLeaseTTLVal: defaultLeaseTTLVal,
 		MaxLeaseTTLVal:     maxLeaseTTLVal,
+		VersionString:      "testVersionString",
 	}
 }
 
@@ -80,6 +81,7 @@ func TestBackendConfig() *BackendConfig {
 	bc := &BackendConfig{
 		Logger: logging.NewVaultLogger(log.Trace),
 		System: TestSystemView(),
+		Config: make(map[string]string),
 	}
 
 	return bc

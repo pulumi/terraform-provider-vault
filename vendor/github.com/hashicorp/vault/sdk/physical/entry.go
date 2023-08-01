@@ -1,5 +1,10 @@
 package physical
 
+import (
+	"encoding/hex"
+	"fmt"
+)
+
 // Entry is used to represent data stored by the physical backend
 type Entry struct {
 	Key      string
@@ -8,10 +13,8 @@ type Entry struct {
 
 	// Only used in replication
 	ValueHash []byte
+}
 
-	// The bool above is an easy control for whether it should be enabled; it
-	// is used to carry information about whether seal wrapping is *desired*
-	// regardless of whether it's currently available. The struct below stores
-	// needed information when it's actually performed.
-	SealWrapInfo *EncryptedBlobInfo `json:"seal_wrap_info,omitempty"`
+func (e *Entry) String() string {
+	return fmt.Sprintf("Key: %s. SealWrap: %t. Value: %s. ValueHash: %s", e.Key, e.SealWrap, hex.EncodeToString(e.Value), hex.EncodeToString(e.ValueHash))
 }
