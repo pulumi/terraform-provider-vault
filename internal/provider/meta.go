@@ -4,23 +4,27 @@
 package provider
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/hcl"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
-	"github.com/hashicorp/vault/command/config"
+	"github.com/mitchellh/go-homedir"
 	"k8s.io/utils/pointer"
 
 	"github.com/hashicorp/terraform-provider-vault/helper"
@@ -545,16 +549,70 @@ func GetToken(d *schema.ResourceData) (string, error) {
 		}
 	}
 
-	// Use ~/.vault-token, or the configured token helper.
-	tokenHelper, err := config.DefaultTokenHelper()
+	return getToken()
+
+}
+
+// Get gets the value of the stored token, if any
+func getToken() (string, error) {
+	// See https://developer.hashicorp.com/vault/docs/commands/token-helper
+	vaultConfigPath, err := homedir.Expand("~/.vault")
 	if err != nil {
-		return "", fmt.Errorf("error getting token helper: %s", err)
+		return "", err
 	}
-	token, err := tokenHelper.Get()
+
+	vaultConfigBytes, err := os.ReadFile(vaultConfigPath)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	vaultConfigFile, err := hcl.ParseBytes(vaultConfigBytes)
 	if err != nil {
-		return "", fmt.Errorf("error getting token: %s", err)
+		return "", err
 	}
-	return strings.TrimSpace(token), nil
+
+	var obj struct {
+		TokenHelper string `hcl:"token_helper"`
+	}
+
+	err = hcl.DecodeObject(&obj, vaultConfigFile.Node)
+	if err != nil {
+		return "", err
+	}
+
+	if obj.TokenHelper == "" {
+
+		tokenFile, err := homedir.Expand("~/.vault-token")
+		if err != nil {
+			return "", err
+		}
+
+		byts, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return "", err
+		}
+
+		return strings.TrimSpace(string(byts)), nil
+	}
+
+	tokenHelperPath := obj.TokenHelper
+	if !filepath.IsAbs(tokenHelperPath) {
+		tokenHelperPath, err = filepath.Abs(tokenHelperPath)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("/bin/sh", "-c", fmt.Sprintf("%s get", tokenHelperPath))
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return stdout.String(), nil
+
 }
 
 func getHCLogger() hclog.Logger {

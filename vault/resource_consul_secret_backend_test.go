@@ -5,7 +5,6 @@ package vault
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
-	consulhelper "github.com/hashicorp/vault/helper/testhelpers/consul"
 
 	"github.com/hashicorp/terraform-provider-vault/internal/consts"
 	"github.com/hashicorp/terraform-provider-vault/internal/provider"
@@ -127,76 +125,6 @@ func TestConsulSecretBackend(t *testing.T) {
 			},
 			testutil.GetImportTestStep(resourceName, false, nil,
 				"token", "bootstrap", "ca_cert", "client_cert", "client_key", "disable_remount"),
-		},
-	})
-}
-
-func TestConsulSecretBackend_Bootstrap(t *testing.T) {
-	t.Parallel()
-	testutil.SkipTestAcc(t)
-
-	path := acctest.RandomWithPrefix("tf-test-consul")
-	resourceType := "vault_consul_secret_backend"
-	resourceName := resourceType + ".test"
-	resourceRoleName := "vault_consul_secret_backend_role.test"
-
-	cleanup, consulConfig := consulhelper.PrepareTestContainer(t, "1.12.3", false, false)
-	t.Cleanup(cleanup)
-	consulAddr := consulConfig.Address()
-
-	resource.Test(t, resource.TestCase{
-		Providers: testProviders,
-		PreCheck: func() {
-			testutil.TestAccPreCheck(t)
-			SkipIfAPIVersionLT(t, testProvider.Meta(), provider.VaultVersion111)
-		},
-		CheckDestroy: testCheckMountDestroyed(resourceType, consts.MountTypeConsul, consts.FieldPath),
-		Steps: []resource.TestStep{
-			{
-				Config:      testConsulSecretBackend_bootstrapConfig(path, consulAddr, "", false),
-				ExpectError: regexp.MustCompile("field 'bootstrap' must be set to true when 'token' is unspecified"),
-			},
-			{
-				Config:      testConsulSecretBackend_bootstrapConfig(path, consulAddr, "token", true),
-				ExpectError: regexp.MustCompile("field 'bootstrap' must be set to false when 'token' is specified"),
-			},
-			{
-				Config: testConsulSecretBackend_bootstrapConfig(path, consulAddr, "", true),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceName, consts.FieldPath, path),
-					resource.TestCheckResourceAttr(resourceName, "address", consulAddr),
-					resource.TestCheckResourceAttr(resourceName, "bootstrap", "true"),
-				),
-			},
-			testutil.GetImportTestStep(resourceName, false, nil, "token", "bootstrap", "disable_remount"),
-			{
-				Config: testConsulSecretBackend_bootstrapAddRole(path, consulAddr),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceRoleName, consts.FieldName, "management"),
-					resource.TestCheckResourceAttr(resourceRoleName, consts.FieldBackend, path),
-					resource.TestCheckResourceAttr(resourceRoleName, "consul_policies.#", "1"),
-					resource.TestCheckTypeSetElemAttr(resourceRoleName, "consul_policies.*", "global-management"),
-				),
-			},
-			{
-				// test graceful remount
-				Config: testConsulSecretBackend_bootstrapAddRole(path+"-new", consulAddr),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceRoleName, consts.FieldName, "management"),
-					resource.TestCheckResourceAttr(resourceRoleName, consts.FieldBackend, path+"-new"),
-					resource.TestCheckResourceAttr(resourceRoleName, "consul_policies.#", "1"),
-					resource.TestCheckTypeSetElemAttr(resourceRoleName, "consul_policies.*", "global-management"),
-				),
-			},
-			{
-				Config:      testConsulSecretBackend_bootstrapAddRoleMulti(path+"-new", consulAddr),
-				ExpectError: regexp.MustCompile(`Token not provided and failed to bootstrap ACLs`),
-			},
-			{
-				// ensure that the failure step above did not introduce any side effects.
-				Config:   testConsulSecretBackend_bootstrapAddRole(path+"-new", consulAddr),
-				PlanOnly: true,
-			},
 		},
 	})
 }
