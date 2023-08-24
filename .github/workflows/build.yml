@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version-file: '.go-version'
+          cache: false
       # setup-terraform is used to install the Terraform CLI. If we don't do
       # this then the terraform-plugin-sdk will attempt to download it for each test!
       - uses: hashicorp/setup-terraform@v2
@@ -122,7 +123,7 @@ jobs:
           --health-timeout 5s
           --health-retries 60
       consul:
-        image: docker.mirror.hashicorp.services/consul:latest
+        image: docker.mirror.hashicorp.services/hashicorp/consul:latest
         env:
           CONSUL_LOCAL_CONFIG: "{\"acl\":{\"enabled\":true}}"
         ports:
@@ -148,6 +149,7 @@ jobs:
       - uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version-file: '.go-version'
+          cache: false
       # setup-terraform is used to install the Terraform CLI. If we don't do
       # this then the terraform-plugin-sdk will attempt to download it for each test!
       - uses: hashicorp/setup-terraform@v2
