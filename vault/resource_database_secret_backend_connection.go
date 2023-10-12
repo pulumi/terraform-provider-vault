@@ -28,6 +28,7 @@ type connectionStringConfig struct {
 	excludeUsernameTemplate bool
 	includeUserPass         bool
 	includeDisableEscaping  bool
+	isCloud                 bool
 }
 
 const (
@@ -94,6 +95,7 @@ var (
 	dbEngineOracle = &dbEngine{
 		name:              "oracle",
 		defaultPluginName: "oracle" + dbPluginSuffix,
+		pluginAliases:     []string{"vault-plugin-database-oracle"},
 	}
 	dbEngineSnowflake = &dbEngine{
 		name:              "snowflake",
@@ -137,6 +139,7 @@ var (
 type dbEngine struct {
 	name              string
 	defaultPluginName string
+	pluginAliases     []string
 }
 
 // GetPluginName from the schema.ResourceData if it is configured,
@@ -180,6 +183,17 @@ func (i *dbEngine) PluginPrefix() (string, error) {
 	}
 
 	return prefix, nil
+}
+
+// PluginPrefixes returns a slice of "plugin-name" prefixes that this engine is
+// compatible with.
+func (i *dbEngine) PluginPrefixes() ([]string, error) {
+	defaultPrefix, err := i.PluginPrefix()
+	if err != nil {
+		return nil, err
+	}
+
+	return append([]string{defaultPrefix}, i.pluginAliases...), nil
 }
 
 func getDatabaseSchema(typ schema.ValueType) schemaMap {
@@ -556,6 +570,7 @@ func getDatabaseSchema(typ schema.ValueType) schemaMap {
 			Elem: connectionStringResource(&connectionStringConfig{
 				includeUserPass:        true,
 				includeDisableEscaping: true,
+				isCloud:                true,
 			}),
 			MaxItems:      1,
 			ConflictsWith: util.CalculateConflictsWith(dbEnginePostgres.Name(), dbEngineTypes),
@@ -752,6 +767,20 @@ func connectionStringResource(config *connectionStringConfig) *schema.Resource {
 		}
 	}
 
+	if config.isCloud {
+		res.Schema["auth_type"] = &schema.Schema{
+			Type:        schema.TypeString,
+			Optional:    true,
+			Description: "Specify alternative authorization type. (Only 'gcp_iam' is valid currently)",
+		}
+		res.Schema["service_account_json"] = &schema.Schema{
+			Type:        schema.TypeString,
+			Optional:    true,
+			Description: "A JSON encoded credential for use with IAM authorization",
+			Sensitive:   true,
+		}
+	}
+
 	if !config.excludeUsernameTemplate {
 		res.Schema["username_template"] = &schema.Schema{
 			Type:        schema.TypeString,
@@ -774,6 +803,7 @@ func connectionStringResource(config *connectionStringConfig) *schema.Resource {
 func mysqlConnectionStringResource() *schema.Resource {
 	r := connectionStringResource(&connectionStringConfig{
 		includeUserPass: true,
+		isCloud:         true,
 	})
 	r.Schema["tls_certificate_key"] = &schema.Schema{
 		Type:        schema.TypeString,
@@ -826,20 +856,23 @@ func getDBEngineFromResp(engines []*dbEngine, r *api.Secret) (*dbEngine, error) 
 	var last int
 	var engine *dbEngine
 	for _, e := range engines {
-		prefix, err := e.PluginPrefix()
+		prefixes, err := e.PluginPrefixes()
 		if err != nil {
 			return nil, err
 		}
-		if prefix != "" && strings.HasPrefix(pluginName.(string), prefix) {
-			l := len(prefix)
-			if last == 0 {
+
+		for _, prefix := range prefixes {
+			if prefix != "" && strings.HasPrefix(pluginName.(string), prefix) {
+				l := len(prefix)
+				if last == 0 {
+					last = l
+				}
+
+				if l >= last {
+					engine = e
+				}
 				last = l
 			}
-
-			if l >= last {
-				engine = e
-			}
-			last = l
 		}
 	}
 
@@ -850,7 +883,7 @@ func getDBEngineFromResp(engines []*dbEngine, r *api.Secret) (*dbEngine, error) 
 	return nil, fmt.Errorf("no supported database engines found for plugin %q", pluginName)
 }
 
-func getDatabaseAPIDataForEngine(engine *dbEngine, idx int, d *schema.ResourceData) (map[string]interface{}, error) {
+func getDatabaseAPIDataForEngine(engine *dbEngine, idx int, d *schema.ResourceData, meta interface{}) (map[string]interface{}, error) {
 	prefix := engine.ResourcePrefix(idx)
 	data := map[string]interface{}{}
 
@@ -877,7 +910,7 @@ func getDatabaseAPIDataForEngine(engine *dbEngine, idx int, d *schema.ResourceDa
 	case dbEngineMSSQL:
 		setMSSQLDatabaseConnectionData(d, prefix, data)
 	case dbEngineMySQL:
-		setMySQLDatabaseConnectionData(d, prefix, data)
+		setMySQLDatabaseConnectionData(d, prefix, data, meta)
 	case dbEngineMySQLRDS:
 		setDatabaseConnectionDataWithUserPass(d, prefix, data)
 	case dbEngineMySQLAurora:
@@ -887,7 +920,7 @@ func getDatabaseAPIDataForEngine(engine *dbEngine, idx int, d *schema.ResourceDa
 	case dbEngineOracle:
 		setDatabaseConnectionDataWithUserPass(d, prefix, data)
 	case dbEnginePostgres:
-		setDatabaseConnectionDataWithDisableEscaping(d, prefix, data)
+		setPostgresDatabaseConnectionData(d, prefix, data, meta)
 	case dbEngineElasticSearch:
 		setElasticsearchDatabaseConnectionData(d, prefix, data)
 	case dbEngineRedis:
@@ -937,10 +970,8 @@ func setCassandraDatabaseConnectionData(d *schema.ResourceData, prefix string, d
 	}
 
 	passwordKey := prefix + consts.FieldPassword
-	fmt.Println("passworkKey", passwordKey)
 	if v, ok := d.GetOk(passwordKey); ok {
 		if d.IsNewResource() || d.HasChange(passwordKey) {
-			fmt.Println("password updated", v.(string))
 			data[consts.FieldPassword] = v.(string)
 		}
 	}
@@ -1012,6 +1043,7 @@ func getConnectionDetailsFromResponse(d *schema.ResourceData, prefix string, res
 			result["username_template"] = v.(string)
 		}
 	}
+
 	return result
 }
 
@@ -1033,6 +1065,31 @@ func getMSSQLConnectionDetailsFromResponse(d *schema.ResourceData, prefix string
 	return result, nil
 }
 
+func getPostgresConnectionDetailsFromResponse(d *schema.ResourceData, prefix string, resp *api.Secret, meta interface{}) map[string]interface{} {
+	result := getConnectionDetailsFromResponseWithDisableEscaping(d, prefix, resp)
+	details := resp.Data["connection_details"]
+	data, ok := details.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// cloud specific
+	if provider.IsAPISupported(meta, provider.VaultVersion115) {
+		if v, ok := data["auth_type"]; ok {
+			result["auth_type"] = v.(string)
+		}
+		if v, ok := d.GetOk(prefix + "service_account_json"); ok {
+			result["service_account_json"] = v.(string)
+		} else {
+			if v, ok := data["service_account_json"]; ok {
+				result["service_account_json"] = v.(string)
+			}
+		}
+	}
+
+	return result
+}
+
 func getConnectionDetailsFromResponseWithDisableEscaping(d *schema.ResourceData, prefix string, resp *api.Secret) map[string]interface{} {
 	result := getConnectionDetailsFromResponseWithUserPass(d, prefix, resp)
 	if result == nil {
@@ -1047,7 +1104,7 @@ func getConnectionDetailsFromResponseWithDisableEscaping(d *schema.ResourceData,
 	return result
 }
 
-func getMySQLConnectionDetailsFromResponse(d *schema.ResourceData, prefix string, resp *api.Secret) map[string]interface{} {
+func getMySQLConnectionDetailsFromResponse(d *schema.ResourceData, prefix string, resp *api.Secret, meta interface{}) map[string]interface{} {
 	result := getConnectionDetailsFromResponseWithUserPass(d, prefix, resp)
 	details := resp.Data["connection_details"]
 	data, ok := details.(map[string]interface{})
@@ -1068,6 +1125,21 @@ func getMySQLConnectionDetailsFromResponse(d *schema.ResourceData, prefix string
 			result["tls_ca"] = v.(string)
 		}
 	}
+
+	if provider.IsAPISupported(meta, provider.VaultVersion115) {
+		// cloud specific
+		if v, ok := data["auth_type"]; ok {
+			result["auth_type"] = v.(string)
+		}
+		if v, ok := d.GetOk(prefix + "service_account_json"); ok {
+			result["service_account_json"] = v.(string)
+		} else {
+			if v, ok := data["service_account_json"]; ok {
+				result["service_account_json"] = v.(string)
+			}
+		}
+	}
+
 	return result
 }
 
@@ -1351,6 +1423,18 @@ func setDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[s
 	}
 }
 
+func setCloudDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}, meta interface{}) {
+	if !provider.IsAPISupported(meta, provider.VaultVersion115) {
+		return
+	}
+	if v, ok := d.GetOk(prefix + "auth_type"); ok {
+		data["auth_type"] = v.(string)
+	}
+	if v, ok := d.GetOk(prefix + "service_account_json"); ok {
+		data["service_account_json"] = v.(string)
+	}
+}
+
 func setMSSQLDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}) {
 	setDatabaseConnectionDataWithDisableEscaping(d, prefix, data)
 	if v, ok := d.GetOk(prefix + "contained_db"); ok {
@@ -1362,14 +1446,20 @@ func setMSSQLDatabaseConnectionData(d *schema.ResourceData, prefix string, data 
 	}
 }
 
-func setMySQLDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}) {
+func setMySQLDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}, meta interface{}) {
 	setDatabaseConnectionDataWithUserPass(d, prefix, data)
+	setCloudDatabaseConnectionData(d, prefix, data, meta)
 	if v, ok := d.GetOk(prefix + "tls_certificate_key"); ok {
 		data["tls_certificate_key"] = v.(string)
 	}
 	if v, ok := d.GetOk(prefix + "tls_ca"); ok {
 		data["tls_ca"] = v.(string)
 	}
+}
+
+func setPostgresDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}, meta interface{}) {
+	setDatabaseConnectionDataWithDisableEscaping(d, prefix, data)
+	setCloudDatabaseConnectionData(d, prefix, data, meta)
 }
 
 func setRedisDatabaseConnectionData(d *schema.ResourceData, prefix string, data map[string]interface{}) {
@@ -1577,7 +1667,7 @@ func databaseSecretBackendConnectionCreateOrUpdate(
 	path := databaseSecretBackendConnectionPath(
 		d.Get("backend").(string), d.Get("name").(string))
 	if err := writeDatabaseSecretConfig(
-		d, client, engine, 0, false, path); err != nil {
+		d, client, engine, 0, false, path, meta); err != nil {
 		return err
 	}
 
@@ -1588,9 +1678,9 @@ func databaseSecretBackendConnectionCreateOrUpdate(
 }
 
 func writeDatabaseSecretConfig(d *schema.ResourceData, client *api.Client,
-	engine *dbEngine, idx int, unifiedSchema bool, path string,
+	engine *dbEngine, idx int, unifiedSchema bool, path string, meta interface{},
 ) error {
-	data, err := getDatabaseAPIDataForEngine(engine, idx, d)
+	data, err := getDatabaseAPIDataForEngine(engine, idx, d, meta)
 	if err != nil {
 		return err
 	}
@@ -1659,11 +1749,11 @@ func validateDBPluginName(s string) error {
 func getSortedPluginPrefixes() ([]string, error) {
 	var pluginPrefixes []string
 	for _, d := range dbEngines {
-		prefix, err := d.PluginPrefix()
+		prefixes, err := d.PluginPrefixes()
 		if err != nil {
 			return nil, err
 		}
-		pluginPrefixes = append(pluginPrefixes, prefix)
+		pluginPrefixes = append(pluginPrefixes, prefixes...)
 	}
 	// sorted by max length
 	sort.Slice(pluginPrefixes, func(i, j int) bool {
@@ -1713,7 +1803,7 @@ func databaseSecretBackendConnectionRead(d *schema.ResourceData, meta interface{
 		return err
 	}
 
-	result, err := getDBConnectionConfig(d, engine, 0, resp)
+	result, err := getDBConnectionConfig(d, engine, 0, resp, meta)
 	if err != nil {
 		return err
 	}
@@ -1769,7 +1859,7 @@ func getDBCommonConfig(d *schema.ResourceData, resp *api.Secret,
 }
 
 func getDBConnectionConfig(d *schema.ResourceData, engine *dbEngine, idx int,
-	resp *api.Secret,
+	resp *api.Secret, meta interface{},
 ) (map[string]interface{}, error) {
 	var result map[string]interface{}
 
@@ -1798,7 +1888,7 @@ func getDBConnectionConfig(d *schema.ResourceData, engine *dbEngine, idx int,
 		}
 		result = values
 	case dbEngineMySQL:
-		result = getMySQLConnectionDetailsFromResponse(d, prefix, resp)
+		result = getMySQLConnectionDetailsFromResponse(d, prefix, resp, meta)
 	case dbEngineMySQLRDS:
 		result = getConnectionDetailsFromResponseWithUserPass(d, prefix, resp)
 	case dbEngineMySQLAurora:
@@ -1808,7 +1898,7 @@ func getDBConnectionConfig(d *schema.ResourceData, engine *dbEngine, idx int,
 	case dbEngineOracle:
 		result = getConnectionDetailsFromResponseWithUserPass(d, prefix, resp)
 	case dbEnginePostgres:
-		result = getConnectionDetailsFromResponseWithDisableEscaping(d, prefix, resp)
+		result = getPostgresConnectionDetailsFromResponse(d, prefix, resp, meta)
 	case dbEngineElasticSearch:
 		result = getElasticsearchConnectionDetailsFromResponse(d, prefix, resp)
 	case dbEngineSnowflake:

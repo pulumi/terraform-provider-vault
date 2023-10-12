@@ -48,6 +48,9 @@ func TestAccSSHSecretBackendRole(t *testing.T) {
 		resource.TestCheckResourceAttr(resourceName, "algorithm_signer", "default"),
 		resource.TestCheckResourceAttr(resourceName, "max_ttl", "0"),
 		resource.TestCheckResourceAttr(resourceName, "ttl", "0"),
+		// 30s is the default value vault uese.
+		// https://developer.hashicorp.com/vault/api-docs/secret/ssh#not_before_duration
+		resource.TestCheckResourceAttr(resourceName, "not_before_duration", "30"),
 	)
 
 	updateCheckFuncs := append(commonCheckFuncs,
@@ -69,6 +72,8 @@ func TestAccSSHSecretBackendRole(t *testing.T) {
 		resource.TestCheckResourceAttr(resourceName, "algorithm_signer", "rsa-sha2-256"),
 		resource.TestCheckResourceAttr(resourceName, "max_ttl", "86400"),
 		resource.TestCheckResourceAttr(resourceName, "ttl", "43200"),
+		// 50m (3000 seconds)
+		resource.TestCheckResourceAttr(resourceName, "not_before_duration", "3000"),
 	)
 
 	getCheckFuncs := func(isUpdate bool) resource.TestCheckFunc {
@@ -142,11 +147,10 @@ func TestAccSSHSecretBackendRole(t *testing.T) {
 
 	t.Run("vault-1.11-and-below", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
-			Providers: testProviders,
+			ProviderFactories: providerFactories,
 			PreCheck: func() {
 				testutil.TestAccPreCheck(t)
 				SkipIfAPIVersionGTE(t, testProvider.Meta(), provider.VaultVersion112)
-
 			},
 			CheckDestroy: testAccSSHSecretBackendRoleCheckDestroy,
 			Steps:        getSteps(""),
@@ -154,26 +158,24 @@ func TestAccSSHSecretBackendRole(t *testing.T) {
 	})
 	t.Run("vault-1.12-and-up", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
-			Providers: testProviders,
+			ProviderFactories: providerFactories,
 			PreCheck: func() {
 				testutil.TestAccPreCheck(t)
 				SkipIfAPIVersionLT(t, testProvider.Meta(), provider.VaultVersion112)
-
 			},
 			CheckDestroy: testAccSSHSecretBackendRoleCheckDestroy,
 			Steps:        getSteps("allowed_domains_template = true"),
 		})
 	})
-
 }
 
 func TestAccSSHSecretBackendRoleOTP_basic(t *testing.T) {
 	backend := acctest.RandomWithPrefix("tf-test/ssh")
 	name := acctest.RandomWithPrefix("tf-test-role")
 	resource.Test(t, resource.TestCase{
-		Providers:    testProviders,
-		PreCheck:     func() { testutil.TestAccPreCheck(t) },
-		CheckDestroy: testAccSSHSecretBackendRoleCheckDestroy,
+		ProviderFactories: providerFactories,
+		PreCheck:          func() { testutil.TestAccPreCheck(t) },
+		CheckDestroy:      testAccSSHSecretBackendRoleCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccSSHSecretBackendRoleOTPConfig_basic(name, backend),
@@ -195,7 +197,7 @@ func TestAccSSHSecretBackendRole_template(t *testing.T) {
 	resourceName := "vault_ssh_secret_backend_role.test_role"
 
 	resource.Test(t, resource.TestCase{
-		Providers: testProviders,
+		ProviderFactories: providerFactories,
 		PreCheck: func() {
 			testutil.TestAccPreCheck(t)
 			SkipIfAPIVersionLT(t, testProvider.Meta(), provider.VaultVersion112)
@@ -306,6 +308,7 @@ resource "vault_ssh_secret_backend_role" "test_role" {
   algorithm_signer         = "rsa-sha2-256"
   max_ttl                  = "86400"
   ttl                      = "43200"
+  not_before_duration      = "3000"
   %s
 `, name, extraFields))
 

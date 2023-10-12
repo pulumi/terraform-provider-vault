@@ -26,7 +26,7 @@ func oktaAuthBackendUserResource() *schema.Resource {
 				// An ID is based on the path/user so we need to break this into it's component parts
 				idParts := strings.Split(d.Id(), "/")
 				if len(idParts) != 2 {
-					return nil, fmt.Errorf("unable to parse the resource ID for okta_auth_backend_user: " +
+					return nil, fmt.Errorf("unable to parse the resource ID for okta_auth_backend_user: "+
 						"expected `path/user` format but got %q", d.Id())
 				}
 				d.Set("path", idParts[0])
